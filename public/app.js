@@ -560,7 +560,7 @@ class MeowSpeechKit {
             }
         } catch (error) {
             console.warn('Failed to parse JSON segments, attempting regex extraction:', error);
-            console.warn('Content received:', content);
+            console.warn('Content length received:', content.length, 'First 200 chars:', content.substring(0, 200));
             
             // Try regex extraction from malformed JSON
             parsedSegments = this.extractSegmentsFromText(content);
