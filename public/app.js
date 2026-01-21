@@ -426,40 +426,50 @@ class MeowSpeechKit {
             const decoder = new TextDecoder();
             let fullContent = '';
             let progress = 10;
+            let bufferedLine = '';
+            const handleDataLine = (line) => {
+                if (!line.startsWith('data: ')) return;
+                try {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.progress) {
+                        fullContent += data.content;
+                        progress = Math.min(progress + 2, 90);
+                        progressFill.style.width = `${progress}%`;
+                        processingText.textContent = '正在使用 AI 处理...';
+                    }
+                    
+                    if (data.done) {
+                        progressFill.style.width = '100%';
+                        processingText.textContent = '处理完成！';
+                        const jsonContent = data.content || fullContent;
+                        this.parseAndDisplaySegments(jsonContent);
+                        setTimeout(() => statusEl.classList.add('hidden'), 1500);
+                    }
+                    
+                    if (data.error) throw new Error(data.error);
+                } catch (e) {
+                    if (e.message !== 'Unexpected end of JSON input') console.error('Parse error:', e);
+                }
+            };
             
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                const chunk = decoder.decode(value, { stream: true });
+                bufferedLine += chunk;
+                const lines = bufferedLine.split('\n');
+                bufferedLine = lines.pop() || '';
                 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            
-                            if (data.progress) {
-                                fullContent += data.content;
-                                progress = Math.min(progress + 2, 90);
-                                progressFill.style.width = `${progress}%`;
-                                processingText.textContent = '正在使用 AI 处理...';
-                            }
-                            
-                            if (data.done) {
-                                progressFill.style.width = '100%';
-                                processingText.textContent = '处理完成！';
-                                const jsonContent = data.content || fullContent;
-                                this.parseAndDisplaySegments(jsonContent);
-                                setTimeout(() => statusEl.classList.add('hidden'), 1500);
-                            }
-                            
-                            if (data.error) throw new Error(data.error);
-                        } catch (e) {
-                            if (e.message !== 'Unexpected end of JSON input') console.error('Parse error:', e);
-                        }
-                    }
+                    handleDataLine(line);
                 }
+            }
+            
+            const trimmedBuffer = bufferedLine.trim();
+            if (trimmedBuffer) {
+                handleDataLine(trimmedBuffer);
             }
         } catch (error) {
             console.error('Processing error:', error);
@@ -484,32 +494,138 @@ class MeowSpeechKit {
     }
     
     parseAndDisplaySegments(content) {
+        let parsedSegments = [];
         try {
             let jsonStr = content;
             const jsonMatch = content.match(/\{[\s\S]*"segments"[\s\S]*\}/);
             if (jsonMatch) jsonStr = jsonMatch[0];
             
             const parsed = JSON.parse(jsonStr);
-            this.segments = parsed.segments || [];
-            
-            this.segments = this.segments.map(seg => ({
-                text: seg.text,
-                duration: seg.duration < SECONDS_TO_MS_THRESHOLD ? seg.duration * 1000 : seg.duration,
-                hasPause: !!seg.text.match(/[.!?。！？,，;；:：]$/)
-            }));
-            
-            this.segments = this.segments.map(seg => ({
-                ...seg,
-                duration: seg.hasPause ? seg.duration + PAUSE_DURATION_MS : seg.duration
-            }));
-            
-            this.displaySegments();
-            this.calculateAndDisplayTotalDuration();
+            parsedSegments = parsed.segments || [];
         } catch (error) {
-            console.error('Failed to parse segments:', error);
-            const content = document.getElementById('script-content').value.trim();
-            this.localSegmentation(content);
+            console.warn('Failed to parse JSON segments, attempting fallback:', error);
+            parsedSegments = this.extractSegmentsFromText(content);
+            if (parsedSegments.length === 0) {
+                const sourceContent = document.getElementById('script-content').value.trim();
+                this.localSegmentation(sourceContent);
+                return;
+            }
         }
+        
+        this.segments = parsedSegments.map(seg => ({
+            text: seg.text,
+            duration: seg.duration < SECONDS_TO_MS_THRESHOLD ? seg.duration * 1000 : seg.duration,
+            hasPause: !!seg.text.match(/[.!?。！？,，;；:：]$/)
+        }));
+        
+        this.segments = this.segments.map(seg => ({
+            ...seg,
+            duration: seg.hasPause ? seg.duration + PAUSE_DURATION_MS : seg.duration
+        }));
+        
+        this.displaySegments();
+        this.calculateAndDisplayTotalDuration();
+    }
+    
+    extractSegmentsFromText(content) {
+        const segments = [];
+        const buildSegmentRegex = (quote, textPattern, order) => {
+            const textField = `${quote}text${quote}\\s*:\\s*${textPattern}`;
+            const durationField = `${quote}duration${quote}\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)`;
+            const pattern = order === 'textFirst'
+                ? `${textField}[^}]*?${durationField}`
+                : `${durationField}[^}]*?${textField}`;
+            return new RegExp(pattern, 'g');
+        };
+        const segmentRegexes = [];
+        [
+            { quote: '"', textPattern: '"((?:\\\\.|[^"\\\\])*)"' },
+            { quote: "'", textPattern: "'((?:\\\\.|[^'\\\\])*)'" }
+        ].forEach(({ quote, textPattern }) => {
+            segmentRegexes.push(
+                { regex: buildSegmentRegex(quote, textPattern, 'textFirst'), textIndex: 1, durationIndex: 2 },
+                { regex: buildSegmentRegex(quote, textPattern, 'durationFirst'), textIndex: 2, durationIndex: 1 }
+            );
+        });
+        const decodeEscapes = (value) => {
+            let result = '';
+            for (let i = 0; i < value.length; i++) {
+                const ch = value[i];
+                if (ch !== '\\' || i === value.length - 1) {
+                    result += ch;
+                    continue;
+                }
+                const next = value[++i];
+                switch (next) {
+                    case 'n':
+                        result += '\n';
+                        break;
+                    case 'r':
+                        result += '\r';
+                        break;
+                    case 't':
+                        result += '\t';
+                        break;
+                    case 'b':
+                        result += '\b';
+                        break;
+                    case 'f':
+                        result += '\f';
+                        break;
+                    case '"':
+                        result += '"';
+                        break;
+                    case "'":
+                        result += "'";
+                        break;
+                    case '\\':
+                        result += '\\';
+                        break;
+                    case 'u': {
+                        const hex = value.slice(i + 1, i + 5);
+                        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+                            result += String.fromCharCode(parseInt(hex, 16));
+                            i += 4;
+                        } else {
+                            result += '\\u';
+                        }
+                        break;
+                    }
+                    default:
+                        result += next;
+                        break;
+                }
+            }
+            return result;
+        };
+        
+        const addMatch = (match, textIndex, durationIndex) => {
+            let text = match[textIndex];
+            try {
+                text = decodeEscapes(text);
+            } catch (error) {
+                // Keep raw text if escape sequences are malformed.
+            }
+            const duration = parseFloat(match[durationIndex]);
+            if (!Number.isNaN(duration)) {
+                segments.push({ text, duration });
+            }
+        };
+        
+        segmentRegexes.forEach(({ regex, textIndex, durationIndex }) => {
+            let match;
+            regex.lastIndex = 0;
+            while ((match = regex.exec(content)) !== null) {
+                if (match[0].length === 0) {
+                    // Avoid infinite loops on zero-length matches.
+                    regex.lastIndex++;
+                    continue;
+                }
+                addMatch(match, textIndex, durationIndex);
+            }
+        });
+        
+        return segments;
     }
     
     localSegmentation(text, targetDuration) {
