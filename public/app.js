@@ -442,7 +442,9 @@ class MeowSpeechKit {
                     if (data.done) {
                         progressFill.style.width = '100%';
                         processingText.textContent = '处理完成！';
+                        // Use the final content from server, or accumulated content as fallback
                         const jsonContent = data.content || fullContent;
+                        console.log('Received complete content from LLM, length:', jsonContent.length);
                         this.parseAndDisplaySegments(jsonContent);
                         setTimeout(() => statusEl.classList.add('hidden'), 1500);
                     }
@@ -496,19 +498,81 @@ class MeowSpeechKit {
     parseAndDisplaySegments(content) {
         let parsedSegments = [];
         try {
-            let jsonStr = content;
-            const jsonMatch = content.match(/\{[\s\S]*"segments"[\s\S]*\}/);
-            if (jsonMatch) jsonStr = jsonMatch[0];
+            let jsonStr = content.trim();
+            
+            // Try to extract JSON from markdown code blocks
+            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+            if (codeBlockMatch) {
+                jsonStr = codeBlockMatch[1].trim();
+            } else {
+                // Try to find JSON object with segments
+                // Use a more robust approach: find first { and match braces properly
+                const firstBrace = jsonStr.indexOf('{');
+                if (firstBrace >= 0 && jsonStr.includes('"segments"')) {
+                    let braceCount = 0;
+                    let inString = false;
+                    let escapeNext = false;
+                    let endIndex = -1;
+                    
+                    for (let i = firstBrace; i < jsonStr.length; i++) {
+                        const char = jsonStr[i];
+                        
+                        if (escapeNext) {
+                            escapeNext = false;
+                            continue;
+                        }
+                        
+                        if (char === '\\') {
+                            escapeNext = true;
+                            continue;
+                        }
+                        
+                        if (char === '"') {
+                            inString = !inString;
+                            continue;
+                        }
+                        
+                        if (!inString) {
+                            if (char === '{') {
+                                braceCount++;
+                            } else if (char === '}') {
+                                braceCount--;
+                                if (braceCount === 0) {
+                                    endIndex = i + 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (endIndex > 0) {
+                        jsonStr = jsonStr.substring(firstBrace, endIndex);
+                    }
+                }
+            }
             
             const parsed = JSON.parse(jsonStr);
             parsedSegments = parsed.segments || [];
-        } catch (error) {
-            console.warn('Failed to parse JSON segments, attempting fallback:', error);
-            parsedSegments = this.extractSegmentsFromText(content);
+            
+            // If we successfully parsed but got no segments, log a warning
             if (parsedSegments.length === 0) {
+                console.warn('Parsed JSON but found no segments');
+            }
+        } catch (error) {
+            console.warn('Failed to parse JSON segments, attempting regex extraction:', error);
+            console.warn('Content length received:', content.length, 'Preview:', content.substring(0, 100) + '...');
+            
+            // Try regex extraction from malformed JSON
+            parsedSegments = this.extractSegmentsFromText(content);
+            
+            // Only fallback to local segmentation if we have no content from LLM
+            if (parsedSegments.length === 0) {
+                console.error('No segments extracted from LLM response, using local segmentation');
                 const sourceContent = document.getElementById('script-content').value.trim();
                 this.localSegmentation(sourceContent);
                 return;
+            } else {
+                console.log(`Extracted ${parsedSegments.length} segments using regex fallback`);
             }
         }
         
