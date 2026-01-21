@@ -38,7 +38,7 @@ const SCRIPTS_FILE = path.join(DATA_DIR, 'scripts.csv');
 const AI_CONFIG_FILE = path.join(__dirname, 'config', 'ai-models.json');
 
 // CSV headers constants
-const SCRIPTS_HEADERS = SCRIPTS_HEADERS;
+const SCRIPTS_HEADERS = ['id', 'userId', 'title', 'content', 'segments', 'targetDuration', 'createdAt'];
 
 // Helper functions for CSV operations
 function readCSV(filePath) {
@@ -98,7 +98,7 @@ function writeCSV(filePath, headers, rows) {
     const lines = [headers.join(',')];
     rows.forEach(row => {
         const values = headers.map(h => {
-            const val = row[h] || '';
+            const val = String(row[h] ?? '');
             if (val.includes(',') || val.includes('"') || val.includes('\n')) {
                 return '"' + val.replace(/"/g, '""') + '"';
             }
@@ -111,7 +111,7 @@ function writeCSV(filePath, headers, rows) {
 
 function appendCSV(filePath, headers, row) {
     const values = headers.map(h => {
-        const val = row[h] || '';
+        const val = String(row[h] ?? '');
         if (val.includes(',') || val.includes('"') || val.includes('\n')) {
             return '"' + val.replace(/"/g, '""') + '"';
         }

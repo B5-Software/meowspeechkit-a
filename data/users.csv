@@ -3,3 +3,4 @@ id,username,passwordHash,createdAt
 10bcff76-b1c6-4fe4-8af2-69a7d6c55d5e,demouser,$2a$10$tIpn34nVyMx7yk3FA24jguXCMPL/2ykWgWTM9hS3m8.Ser7uegrrS,2026-01-21T02:21:22.556Z
 a4e7df1f-8d48-447b-9b04-e28d5136a945,testuser2,$2a$10$SOMzVh/fVdho44HQEygqiukIeJi//qKOKgOT5eeWnnl1weU.pbwDe,2026-01-21T04:36:09.579Z
 b998b727-04ad-4bdd-9b12-26364078cbc2,testuser3,$2a$10$yrQpTE9LCIzsgYiHmTu2.O4pQCzkNb8gecvGS0hboUk8VFrJQU5MS,2026-01-21T07:17:26.996Z
+ba143c75-2859-43f0-9165-5ea65b3a2d5c,testuser5,$2a$10$aiWnv9mPKZ1fdkqwNwASp.6EdONEquB3v3AD5xuHGFR2X4LmCkMgy,2026-01-21T08:57:57.248Z
