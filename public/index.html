@@ -51,11 +51,39 @@
             </div>
         </div>
 
+        <!-- Projects Section -->
+        <div id="projects-section" class="section hidden">
+            <header class="main-header">
+                <h1 class="logo">MeowSpeechKit-A</h1>
+                <div class="header-right">
+                    <span id="projects-user-info"></span>
+                    <span id="projects-rate-limit-info"></span>
+                    <button id="projects-logout-btn" class="btn btn-secondary">Logout</button>
+                </div>
+            </header>
+            
+            <main class="projects-content">
+                <div class="projects-panel">
+                    <h2>My Projects</h2>
+                    <p class="projects-subtitle">Select a project to continue or create a new one</p>
+                    
+                    <div class="projects-actions">
+                        <button id="new-project-btn" class="btn btn-primary">New Project</button>
+                    </div>
+                    
+                    <div id="projects-list" class="projects-list">
+                        <p class="placeholder-text">Loading projects...</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+
         <!-- Main Section -->
         <div id="main-section" class="section hidden">
             <header class="main-header">
                 <h1 class="logo">MeowSpeechKit-A</h1>
                 <div class="header-right">
+                    <button id="back-to-projects-btn" class="btn btn-secondary">Back to Projects</button>
                     <span id="user-info"></span>
                     <span id="rate-limit-info"></span>
                     <button id="logout-btn" class="btn btn-secondary">Logout</button>
@@ -65,6 +93,7 @@
             <main class="main-content">
                 <div class="editor-panel">
                     <h2>Speech Script</h2>
+                    <p id="current-project-name" class="current-project-name"></p>
                     
                     <div class="form-group">
                         <label for="script-title">Title</label>
@@ -88,6 +117,7 @@
                     
                     <div class="button-group">
                         <button id="process-btn" class="btn btn-primary">Process with AI</button>
+                        <button id="save-project-btn" class="btn btn-secondary">Save Project</button>
                         <button id="play-btn" class="btn btn-success" disabled>Play Teleprompter</button>
                     </div>
                     

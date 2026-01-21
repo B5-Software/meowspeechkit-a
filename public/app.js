@@ -1,15 +1,21 @@
 // MeowSpeechKit-A Frontend Application
 
+// Constants for timing calculations
+const MS_PER_WORD = 400; // Average speaking rate: 150 words/min = 400ms/word
+const MIN_PHRASE_DURATION_MS = 300; // Minimum duration per phrase
+const SECONDS_TO_MS_THRESHOLD = 100; // If duration < 100, assume it's in seconds
+
 class MeowSpeechKit {
     constructor() {
         this.currentUser = null;
+        this.currentProject = null;
         this.segments = [];
         this.currentSegmentIndex = 0;
         this.isPlaying = false;
         this.isPaused = false;
         this.timerInterval = null;
         this.playbackInterval = null;
-        this.elapsedSeconds = 0;
+        this.elapsedMs = 0;
         this.countdownSeconds = 10;
         this.playbackSpeed = 1.0;
         this.candidateLines = 2;
@@ -43,8 +49,14 @@ class MeowSpeechKit {
             this.handleRegister();
         });
         
-        // Logout
+        // Logout buttons
         document.getElementById('logout-btn').addEventListener('click', () => this.handleLogout());
+        document.getElementById('projects-logout-btn').addEventListener('click', () => this.handleLogout());
+        
+        // Projects section
+        document.getElementById('new-project-btn').addEventListener('click', () => this.createNewProject());
+        document.getElementById('back-to-projects-btn').addEventListener('click', () => this.showProjectsSection());
+        document.getElementById('save-project-btn').addEventListener('click', () => this.saveCurrentProject());
         
         // Process button
         document.getElementById('process-btn').addEventListener('click', () => this.processText());
@@ -88,7 +100,7 @@ class MeowSpeechKit {
             
             if (response.ok) {
                 this.currentUser = data.username;
-                this.showMainSection();
+                this.showProjectsSection();
             } else {
                 errorEl.textContent = data.error;
             }
@@ -119,7 +131,7 @@ class MeowSpeechKit {
             
             if (response.ok) {
                 this.currentUser = data.username;
-                this.showMainSection();
+                this.showProjectsSection();
             } else {
                 errorEl.textContent = data.error;
             }
@@ -132,6 +144,7 @@ class MeowSpeechKit {
         try {
             await fetch('/api/logout', { method: 'POST' });
             this.currentUser = null;
+            this.currentProject = null;
             this.showAuthSection();
         } catch (error) {
             console.error('Logout error:', error);
@@ -145,7 +158,7 @@ class MeowSpeechKit {
             
             if (data.authenticated) {
                 this.currentUser = data.username;
-                this.showMainSection();
+                this.showProjectsSection();
             } else {
                 this.showAuthSection();
             }
@@ -156,16 +169,171 @@ class MeowSpeechKit {
     
     showAuthSection() {
         document.getElementById('auth-section').classList.remove('hidden');
+        document.getElementById('projects-section').classList.add('hidden');
         document.getElementById('main-section').classList.add('hidden');
         document.getElementById('teleprompter-section').classList.add('hidden');
     }
     
+    async showProjectsSection() {
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('projects-section').classList.remove('hidden');
+        document.getElementById('main-section').classList.add('hidden');
+        document.getElementById('teleprompter-section').classList.add('hidden');
+        
+        document.getElementById('projects-user-info').textContent = `Welcome, ${this.currentUser}`;
+        
+        await this.loadProjects();
+        await this.updateProjectsRateLimitInfo();
+    }
+    
+    async loadProjects() {
+        const listEl = document.getElementById('projects-list');
+        listEl.innerHTML = '<p class="placeholder-text">Loading projects...</p>';
+        
+        try {
+            const response = await fetch('/api/scripts');
+            const projects = await response.json();
+            
+            if (projects.length === 0) {
+                listEl.innerHTML = '<p class="placeholder-text">No projects yet. Create your first project!</p>';
+            } else {
+                listEl.innerHTML = projects.map(p => `
+                    <div class="project-item" data-id="${p.id}">
+                        <div class="project-info">
+                            <h3>${this.escapeHtml(p.title)}</h3>
+                            <p>Created: ${new Date(p.createdAt).toLocaleDateString()}</p>
+                        </div>
+                        <div class="project-actions">
+                            <button class="btn btn-primary btn-small project-open-btn" data-project-id="${p.id}">Open</button>
+                            <button class="btn btn-danger btn-small project-delete-btn" data-project-id="${p.id}">Delete</button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Add event listeners using event delegation
+                listEl.querySelectorAll('.project-open-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.openProject(btn.dataset.projectId);
+                    });
+                });
+                
+                listEl.querySelectorAll('.project-delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.deleteProject(btn.dataset.projectId);
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load projects:', error);
+            listEl.innerHTML = '<p class="placeholder-text">Failed to load projects</p>';
+        }
+    }
+    
+    async updateProjectsRateLimitInfo() {
+        try {
+            const response = await fetch('/api/rate-limit');
+            const data = await response.json();
+            
+            document.getElementById('projects-rate-limit-info').textContent = 
+                `AI calls: ${data.used}/${data.limit} (${data.remaining} remaining)`;
+        } catch (error) {
+            console.error('Failed to get rate limit:', error);
+        }
+    }
+    
+    createNewProject() {
+        this.currentProject = {
+            id: null,
+            title: 'New Project',
+            content: '',
+            segments: []
+        };
+        this.segments = [];
+        this.showMainSection();
+        
+        document.getElementById('script-title').value = '';
+        document.getElementById('script-content').value = '';
+        document.getElementById('segments-preview').innerHTML = '<p class="placeholder-text">Process your script to see segments here</p>';
+        document.getElementById('play-btn').disabled = true;
+    }
+    
+    async openProject(id) {
+        try {
+            const response = await fetch(`/api/scripts/${id}`);
+            const project = await response.json();
+            
+            this.currentProject = project;
+            this.segments = project.segments || [];
+            this.showMainSection();
+            
+            document.getElementById('script-title').value = project.title;
+            document.getElementById('script-content').value = project.content;
+            
+            if (this.segments.length > 0) {
+                this.displaySegments();
+                document.getElementById('play-btn').disabled = false;
+            }
+        } catch (error) {
+            console.error('Failed to open project:', error);
+            alert('Failed to open project');
+        }
+    }
+    
+    async deleteProject(id) {
+        if (!confirm('Are you sure you want to delete this project?')) return;
+        
+        try {
+            const response = await fetch(`/api/scripts/${id}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                await this.loadProjects();
+            }
+        } catch (error) {
+            console.error('Failed to delete project:', error);
+        }
+    }
+    
+    async saveCurrentProject() {
+        const title = document.getElementById('script-title').value || 'Untitled';
+        const content = document.getElementById('script-content').value;
+        
+        try {
+            const response = await fetch('/api/scripts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: this.currentProject?.id,
+                    title,
+                    content,
+                    segments: this.segments
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.currentProject = { ...this.currentProject, id: data.id, title, content };
+                alert('Project saved successfully!');
+            }
+        } catch (error) {
+            console.error('Failed to save project:', error);
+            alert('Failed to save project');
+        }
+    }
+    
     async showMainSection() {
         document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('projects-section').classList.add('hidden');
         document.getElementById('main-section').classList.remove('hidden');
         document.getElementById('teleprompter-section').classList.add('hidden');
         
         document.getElementById('user-info').textContent = `Welcome, ${this.currentUser}`;
+        document.getElementById('current-project-name').textContent = 
+            `Project: ${this.currentProject?.title || 'New Project'}`;
         
         await this.loadModels();
         await this.updateRateLimitInfo();
@@ -330,6 +498,12 @@ class MeowSpeechKit {
             const parsed = JSON.parse(jsonStr);
             this.segments = parsed.segments || [];
             
+            // Convert seconds to milliseconds if needed
+            this.segments = this.segments.map(seg => ({
+                text: seg.text,
+                duration: seg.duration < SECONDS_TO_MS_THRESHOLD ? seg.duration * 1000 : seg.duration
+            }));
+            
             this.displaySegments();
         } catch (error) {
             console.error('Failed to parse segments:', error);
@@ -340,22 +514,40 @@ class MeowSpeechKit {
     }
     
     localSegmentation(text, targetDuration) {
-        // Split by sentences
-        const sentences = text.split(/(?<=[.!?。！？])\s*/).filter(s => s.trim());
+        // Split into short phrases (2-3 words each)
+        const words = text.split(/\s+/).filter(w => w.trim());
         this.segments = [];
         
-        const totalWords = text.split(/\s+/).length;
-        const avgWordsPerSecond = targetDuration ? totalWords / targetDuration : 2.5;
+        const totalWords = words.length;
+        const targetMs = targetDuration ? targetDuration * 1000 : null;
         
-        for (const sentence of sentences) {
-            const words = sentence.trim().split(/\s+/).length;
-            const duration = Math.max(1, Math.round(words / avgWordsPerSecond));
+        // Calculate milliseconds per word based on speaking rate
+        const msPerWord = targetMs ? (targetMs / totalWords) : MS_PER_WORD;
+        
+        // Group words into phrases of 2-3 words
+        let currentPhrase = [];
+        let phraseWordLimit = 2; // Start with 2, alternate between 2 and 3
+        
+        for (let i = 0; i < words.length; i++) {
+            currentPhrase.push(words[i]);
             
-            if (sentence.trim()) {
+            // Check if we should end the phrase
+            const shouldEnd = currentPhrase.length >= phraseWordLimit ||
+                              i === words.length - 1 ||
+                              words[i].match(/[.!?。！？,，;；:：]$/);
+            
+            if (shouldEnd && currentPhrase.length > 0) {
+                const phraseText = currentPhrase.join(' ');
+                const duration = Math.round(currentPhrase.length * msPerWord);
+                
                 this.segments.push({
-                    text: sentence.trim(),
-                    duration: duration
+                    text: phraseText,
+                    duration: Math.max(MIN_PHRASE_DURATION_MS, duration)
                 });
+                
+                currentPhrase = [];
+                // Alternate between 2 and 3 word phrases
+                phraseWordLimit = phraseWordLimit === 2 ? 3 : 2;
             }
         }
         
@@ -372,9 +564,9 @@ class MeowSpeechKit {
         }
         
         previewEl.innerHTML = this.segments.map((segment, index) => `
-            <div class="segment-item" style="animation-delay: ${index * 0.1}s">
+            <div class="segment-item" style="animation-delay: ${index * 0.05}s">
                 <p class="segment-text">${this.escapeHtml(segment.text)}</p>
-                <span class="segment-duration">${segment.duration}s</span>
+                <span class="segment-duration">${segment.duration}ms</span>
             </div>
         `).join('');
         
@@ -402,7 +594,7 @@ class MeowSpeechKit {
         }
         
         this.currentSegmentIndex = 0;
-        this.elapsedSeconds = 0;
+        this.elapsedMs = 0;
         this.countdownSeconds = 10;
         this.isPlaying = true;
         this.isPaused = false;
@@ -417,6 +609,12 @@ class MeowSpeechKit {
         
         let html = '';
         
+        // Add spacer divs to ensure first phrase is centered
+        const spacerCount = n;
+        for (let i = 0; i < spacerCount; i++) {
+            html += `<div class="teleprompter-line spacer" style="font-size: ${this.fontSize}px; opacity: 0;">&nbsp;</div>`;
+        }
+        
         for (let i = 0; i < this.segments.length; i++) {
             const diff = Math.abs(i - this.currentSegmentIndex);
             let className = 'teleprompter-line';
@@ -430,6 +628,11 @@ class MeowSpeechKit {
             }
             
             html += `<div class="${className}" style="font-size: ${this.fontSize}px">${this.escapeHtml(this.segments[i].text)}</div>`;
+        }
+        
+        // Add spacer divs at the end too
+        for (let i = 0; i < spacerCount; i++) {
+            html += `<div class="teleprompter-line spacer" style="font-size: ${this.fontSize}px; opacity: 0;">&nbsp;</div>`;
         }
         
         contentEl.innerHTML = html;
@@ -462,12 +665,12 @@ class MeowSpeechKit {
         // Start segment timing
         this.scheduleNextSegment();
         
-        // Start elapsed timer
+        // Start elapsed timer (update every 100ms for smoother display)
         this.timerInterval = setInterval(() => {
             if (this.isPaused) return;
-            this.elapsedSeconds++;
+            this.elapsedMs += 100;
             this.updateTimer();
-        }, 1000);
+        }, 100);
     }
     
     scheduleNextSegment() {
@@ -477,7 +680,8 @@ class MeowSpeechKit {
         }
         
         const segment = this.segments[this.currentSegmentIndex];
-        const duration = (segment.duration * 1000) / this.playbackSpeed;
+        // Duration is in milliseconds, adjust for playback speed
+        const duration = segment.duration / this.playbackSpeed;
         
         this.playbackInterval = setTimeout(() => {
             if (this.isPaused) {
@@ -494,9 +698,11 @@ class MeowSpeechKit {
     
     updateTimer() {
         const timerEl = document.getElementById('timer-value');
-        const minutes = Math.floor(this.elapsedSeconds / 60);
-        const seconds = this.elapsedSeconds % 60;
-        timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        const totalSeconds = Math.floor(this.elapsedMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const ms = Math.floor((this.elapsedMs % 1000) / 100);
+        timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${ms}`;
     }
     
     togglePause() {
@@ -605,6 +811,7 @@ class MeowSpeechKit {
 }
 
 // Initialize the application
+let app;
 document.addEventListener('DOMContentLoaded', () => {
-    new MeowSpeechKit();
+    app = new MeowSpeechKit();
 });

@@ -10,6 +10,10 @@ const http = require('http');
 const app = express();
 const PORT = 10500;
 
+// Constants for timing calculations
+const MS_PER_WORD = 400; // Average speaking rate: 150 words/min = 400ms/word
+const MIN_PHRASE_DURATION_MS = 300; // Minimum duration per phrase
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -293,15 +297,15 @@ app.post('/api/process-text', requireAuth, async (req, res) => {
         res.setHeader('X-Accel-Buffering', 'no');
         
         const durationInfo = targetDuration 
-            ? `The total duration should be approximately ${targetDuration} seconds.` 
+            ? `The total duration should be approximately ${targetDuration * 1000} milliseconds (${targetDuration} seconds).` 
             : '';
         
-        const prompt = `Please segment the following speech text into natural phrases for a teleprompter. ${durationInfo}
+        const prompt = `Please segment the following speech text into SHORT PHRASES (2-3 words each) for a teleprompter. ${durationInfo}
 
 Speech text:
 ${text}
 
-Output the result as JSON with segments array containing text and duration (in seconds) for each segment.`;
+Output the result as JSON with segments array containing text and duration (in MILLISECONDS) for each segment. Each 2-word phrase should be around 800ms, each 3-word phrase around 1200ms.`;
 
         // Make API request to AI model
         const requestBody = JSON.stringify({
@@ -397,22 +401,39 @@ Output the result as JSON with segments array containing text and duration (in s
 
 // Local fallback for text segmentation
 function generateLocalSegments(text, targetDuration) {
-    // Split by sentences and natural breaks
-    const sentences = text.split(/(?<=[.!?。！？])\s*/).filter(s => s.trim());
+    // Split into short phrases (2-3 words each)
+    const words = text.split(/\s+/).filter(w => w.trim());
     const segments = [];
     
-    const totalWords = text.split(/\s+/).length;
-    const avgWordsPerSecond = targetDuration ? totalWords / targetDuration : 2.5;
+    const totalWords = words.length;
+    const targetMs = targetDuration ? targetDuration * 1000 : null;
     
-    for (const sentence of sentences) {
-        const words = sentence.trim().split(/\s+/).length;
-        const duration = Math.max(1, Math.round(words / avgWordsPerSecond));
+    // Calculate milliseconds per word based on speaking rate
+    const msPerWord = targetMs ? (targetMs / totalWords) : MS_PER_WORD;
+    
+    // Group words into phrases of 2-3 words
+    let currentPhrase = [];
+    let phraseWordLimit = 2;
+    
+    for (let i = 0; i < words.length; i++) {
+        currentPhrase.push(words[i]);
         
-        if (sentence.trim()) {
+        // Check if we should end the phrase
+        const shouldEnd = currentPhrase.length >= phraseWordLimit ||
+                          i === words.length - 1 ||
+                          words[i].match(/[.!?。！？,，;；:：]$/);
+        
+        if (shouldEnd && currentPhrase.length > 0) {
+            const phraseText = currentPhrase.join(' ');
+            const duration = Math.round(currentPhrase.length * msPerWord);
+            
             segments.push({
-                text: sentence.trim(),
-                duration: duration
+                text: phraseText,
+                duration: Math.max(MIN_PHRASE_DURATION_MS, duration)
             });
+            
+            currentPhrase = [];
+            phraseWordLimit = phraseWordLimit === 2 ? 3 : 2;
         }
     }
     
@@ -422,21 +443,37 @@ function generateLocalSegments(text, targetDuration) {
 // Save script
 app.post('/api/scripts', requireAuth, (req, res) => {
     try {
-        const { title, content, segments } = req.body;
+        const { id, title, content, segments } = req.body;
         const userId = req.session.userId;
         
-        const script = {
-            id: uuidv4(),
-            userId: userId,
-            title: title || 'Untitled',
-            content: content,
-            segments: JSON.stringify(segments),
-            createdAt: new Date().toISOString()
-        };
+        const scripts = readCSV(SCRIPTS_FILE);
+        const existingIndex = id ? scripts.findIndex(s => s.id === id && s.userId === userId) : -1;
         
-        appendCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], script);
-        
-        res.json({ success: true, id: script.id });
+        if (existingIndex >= 0) {
+            // Update existing script
+            scripts[existingIndex] = {
+                ...scripts[existingIndex],
+                title: title || 'Untitled',
+                content: content || '',
+                segments: JSON.stringify(segments || [])
+            };
+            
+            writeCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], scripts);
+            res.json({ success: true, id: scripts[existingIndex].id });
+        } else {
+            // Create new script
+            const script = {
+                id: uuidv4(),
+                userId: userId,
+                title: title || 'Untitled',
+                content: content || '',
+                segments: JSON.stringify(segments || []),
+                createdAt: new Date().toISOString()
+            };
+            
+            appendCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], script);
+            res.json({ success: true, id: script.id });
+        }
     } catch (error) {
         console.error('Save script error:', error);
         res.status(500).json({ error: 'Failed to save script' });
@@ -481,6 +518,25 @@ app.get('/api/scripts/:id', requireAuth, (req, res) => {
     } catch (error) {
         console.error('Get script error:', error);
         res.status(500).json({ error: 'Failed to get script' });
+    }
+});
+
+// Delete script
+app.delete('/api/scripts/:id', requireAuth, (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const scripts = readCSV(SCRIPTS_FILE);
+        const filteredScripts = scripts.filter(s => !(s.id === req.params.id && s.userId === userId));
+        
+        if (filteredScripts.length === scripts.length) {
+            return res.status(404).json({ error: 'Script not found' });
+        }
+        
+        writeCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], filteredScripts);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete script error:', error);
+        res.status(500).json({ error: 'Failed to delete script' });
     }
 });
 
