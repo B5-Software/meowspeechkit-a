@@ -442,7 +442,9 @@ class MeowSpeechKit {
                     if (data.done) {
                         progressFill.style.width = '100%';
                         processingText.textContent = '处理完成！';
+                        // Use the final content from server, or accumulated content as fallback
                         const jsonContent = data.content || fullContent;
+                        console.log('Received complete content from LLM, length:', jsonContent.length);
                         this.parseAndDisplaySegments(jsonContent);
                         setTimeout(() => statusEl.classList.add('hidden'), 1500);
                     }
@@ -496,19 +498,62 @@ class MeowSpeechKit {
     parseAndDisplaySegments(content) {
         let parsedSegments = [];
         try {
-            let jsonStr = content;
-            const jsonMatch = content.match(/\{[\s\S]*"segments"[\s\S]*\}/);
-            if (jsonMatch) jsonStr = jsonMatch[0];
+            let jsonStr = content.trim();
+            
+            // Try to extract JSON from markdown code blocks
+            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (codeBlockMatch) {
+                jsonStr = codeBlockMatch[1];
+            } else {
+                // Try to find JSON object with segments
+                const jsonMatch = jsonStr.match(/\{[\s\S]*?"segments"[\s\S]*?\]/);
+                if (jsonMatch) {
+                    // Find the closing brace for this JSON object
+                    let braceCount = 0;
+                    let startFound = false;
+                    let endIndex = -1;
+                    
+                    for (let i = 0; i < jsonStr.length; i++) {
+                        if (jsonStr[i] === '{') {
+                            braceCount++;
+                            startFound = true;
+                        } else if (jsonStr[i] === '}') {
+                            braceCount--;
+                            if (startFound && braceCount === 0) {
+                                endIndex = i + 1;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (endIndex > 0) {
+                        jsonStr = jsonStr.substring(0, endIndex);
+                    }
+                }
+            }
             
             const parsed = JSON.parse(jsonStr);
             parsedSegments = parsed.segments || [];
-        } catch (error) {
-            console.warn('Failed to parse JSON segments, attempting fallback:', error);
-            parsedSegments = this.extractSegmentsFromText(content);
+            
+            // If we successfully parsed but got no segments, log a warning
             if (parsedSegments.length === 0) {
+                console.warn('Parsed JSON but found no segments');
+            }
+        } catch (error) {
+            console.warn('Failed to parse JSON segments, attempting regex extraction:', error);
+            console.warn('Content received:', content);
+            
+            // Try regex extraction from malformed JSON
+            parsedSegments = this.extractSegmentsFromText(content);
+            
+            // Only fallback to local segmentation if we have no content from LLM
+            if (parsedSegments.length === 0) {
+                console.error('No segments extracted from LLM response, using local segmentation');
                 const sourceContent = document.getElementById('script-content').value.trim();
                 this.localSegmentation(sourceContent);
                 return;
+            } else {
+                console.log(`Extracted ${parsedSegments.length} segments using regex fallback`);
             }
         }
         
