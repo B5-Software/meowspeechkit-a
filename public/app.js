@@ -501,33 +501,52 @@ class MeowSpeechKit {
             let jsonStr = content.trim();
             
             // Try to extract JSON from markdown code blocks
-            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            const codeBlockMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
             if (codeBlockMatch) {
-                jsonStr = codeBlockMatch[1];
+                jsonStr = codeBlockMatch[1].trim();
             } else {
                 // Try to find JSON object with segments
-                const jsonMatch = jsonStr.match(/\{[\s\S]*?"segments"[\s\S]*?\]/);
-                if (jsonMatch) {
-                    // Find the closing brace for this JSON object
+                // Use a more robust approach: find first { and match braces properly
+                const firstBrace = jsonStr.indexOf('{');
+                if (firstBrace >= 0 && jsonStr.includes('"segments"')) {
                     let braceCount = 0;
-                    let startFound = false;
+                    let inString = false;
+                    let escapeNext = false;
                     let endIndex = -1;
                     
-                    for (let i = 0; i < jsonStr.length; i++) {
-                        if (jsonStr[i] === '{') {
-                            braceCount++;
-                            startFound = true;
-                        } else if (jsonStr[i] === '}') {
-                            braceCount--;
-                            if (startFound && braceCount === 0) {
-                                endIndex = i + 1;
-                                break;
+                    for (let i = firstBrace; i < jsonStr.length; i++) {
+                        const char = jsonStr[i];
+                        
+                        if (escapeNext) {
+                            escapeNext = false;
+                            continue;
+                        }
+                        
+                        if (char === '\\') {
+                            escapeNext = true;
+                            continue;
+                        }
+                        
+                        if (char === '"') {
+                            inString = !inString;
+                            continue;
+                        }
+                        
+                        if (!inString) {
+                            if (char === '{') {
+                                braceCount++;
+                            } else if (char === '}') {
+                                braceCount--;
+                                if (braceCount === 0) {
+                                    endIndex = i + 1;
+                                    break;
+                                }
                             }
                         }
                     }
                     
                     if (endIndex > 0) {
-                        jsonStr = jsonStr.substring(0, endIndex);
+                        jsonStr = jsonStr.substring(firstBrace, endIndex);
                     }
                 }
             }
