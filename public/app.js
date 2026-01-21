@@ -1,9 +1,10 @@
-// MeowSpeechKit-A Frontend Application
+// MeowSpeechKit-A Frontend Application - 简体中文版
 
 // Constants for timing calculations
 const MS_PER_WORD = 400; // Average speaking rate: 150 words/min = 400ms/word
 const MIN_PHRASE_DURATION_MS = 300; // Minimum duration per phrase
 const SECONDS_TO_MS_THRESHOLD = 100; // If duration < 100, assume it's in seconds
+const PAUSE_DURATION_MS = 200; // Natural pause between phrases
 
 class MeowSpeechKit {
     constructor() {
@@ -21,6 +22,8 @@ class MeowSpeechKit {
         this.candidateLines = 2;
         this.fontSize = 48;
         this.isDarkMode = false;
+        this.targetDuration = null;
+        this.editingSegmentIndex = null;
         
         this.init();
     }
@@ -72,6 +75,11 @@ class MeowSpeechKit {
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('exit-btn').addEventListener('click', () => this.exitTeleprompter());
         
+        // Modal events
+        document.getElementById('error-modal-close').addEventListener('click', () => this.closeErrorModal());
+        document.getElementById('duration-modal-cancel').addEventListener('click', () => this.closeDurationModal());
+        document.getElementById('duration-modal-save').addEventListener('click', () => this.saveDuration());
+        
         // Keyboard shortcuts for teleprompter
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
     }
@@ -102,10 +110,10 @@ class MeowSpeechKit {
                 this.currentUser = data.username;
                 this.showProjectsSection();
             } else {
-                errorEl.textContent = data.error;
+                errorEl.textContent = data.error || '登录失败，请重试';
             }
         } catch (error) {
-            errorEl.textContent = 'Login failed. Please try again.';
+            errorEl.textContent = '登录失败，请重试';
         }
     }
     
@@ -116,7 +124,7 @@ class MeowSpeechKit {
         const errorEl = document.getElementById('register-error');
         
         if (password !== confirm) {
-            errorEl.textContent = 'Passwords do not match.';
+            errorEl.textContent = '两次输入的密码不一致';
             return;
         }
         
@@ -133,10 +141,10 @@ class MeowSpeechKit {
                 this.currentUser = data.username;
                 this.showProjectsSection();
             } else {
-                errorEl.textContent = data.error;
+                errorEl.textContent = data.error || '注册失败，请重试';
             }
         } catch (error) {
-            errorEl.textContent = 'Registration failed. Please try again.';
+            errorEl.textContent = '注册失败，请重试';
         }
     }
     
@@ -180,7 +188,7 @@ class MeowSpeechKit {
         document.getElementById('main-section').classList.add('hidden');
         document.getElementById('teleprompter-section').classList.add('hidden');
         
-        document.getElementById('projects-user-info').textContent = `Welcome, ${this.currentUser}`;
+        document.getElementById('projects-user-info').textContent = `欢迎，${this.currentUser}`;
         
         await this.loadProjects();
         await this.updateProjectsRateLimitInfo();
@@ -188,29 +196,28 @@ class MeowSpeechKit {
     
     async loadProjects() {
         const listEl = document.getElementById('projects-list');
-        listEl.innerHTML = '<p class="placeholder-text">Loading projects...</p>';
+        listEl.innerHTML = '<p class="placeholder-text">正在加载项目...</p>';
         
         try {
             const response = await fetch('/api/scripts');
             const projects = await response.json();
             
             if (projects.length === 0) {
-                listEl.innerHTML = '<p class="placeholder-text">No projects yet. Create your first project!</p>';
+                listEl.innerHTML = '<p class="placeholder-text">暂无项目，请创建您的第一个项目！</p>';
             } else {
                 listEl.innerHTML = projects.map(p => `
                     <div class="project-item" data-id="${p.id}">
                         <div class="project-info">
                             <h3>${this.escapeHtml(p.title)}</h3>
-                            <p>Created: ${new Date(p.createdAt).toLocaleDateString()}</p>
+                            <p>创建时间：${new Date(p.createdAt).toLocaleDateString('zh-CN')}</p>
                         </div>
                         <div class="project-actions">
-                            <button class="btn btn-primary btn-small project-open-btn" data-project-id="${p.id}">Open</button>
-                            <button class="btn btn-danger btn-small project-delete-btn" data-project-id="${p.id}">Delete</button>
+                            <button class="btn btn-primary btn-small project-open-btn" data-project-id="${p.id}">打开</button>
+                            <button class="btn btn-danger btn-small project-delete-btn" data-project-id="${p.id}">删除</button>
                         </div>
                     </div>
                 `).join('');
                 
-                // Add event listeners using event delegation
                 listEl.querySelectorAll('.project-open-btn').forEach(btn => {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -227,7 +234,7 @@ class MeowSpeechKit {
             }
         } catch (error) {
             console.error('Failed to load projects:', error);
-            listEl.innerHTML = '<p class="placeholder-text">Failed to load projects</p>';
+            listEl.innerHTML = '<p class="placeholder-text">加载项目失败</p>';
         }
     }
     
@@ -237,26 +244,24 @@ class MeowSpeechKit {
             const data = await response.json();
             
             document.getElementById('projects-rate-limit-info').textContent = 
-                `AI calls: ${data.used}/${data.limit} (${data.remaining} remaining)`;
+                `AI调用次数：${data.used}/${data.limit}（剩余 ${data.remaining} 次）`;
         } catch (error) {
             console.error('Failed to get rate limit:', error);
         }
     }
     
     createNewProject() {
-        this.currentProject = {
-            id: null,
-            title: 'New Project',
-            content: '',
-            segments: []
-        };
+        this.currentProject = { id: null, title: '新项目', content: '', segments: [], targetDuration: null };
         this.segments = [];
+        this.targetDuration = null;
         this.showMainSection();
         
         document.getElementById('script-title').value = '';
         document.getElementById('script-content').value = '';
-        document.getElementById('segments-preview').innerHTML = '<p class="placeholder-text">Process your script to see segments here</p>';
+        document.getElementById('target-duration').value = '';
+        document.getElementById('segments-preview').innerHTML = '<p class="placeholder-text">请先进行 AI 分词以查看分段</p>';
         document.getElementById('play-btn').disabled = true;
+        document.getElementById('total-duration-info').classList.add('hidden');
     }
     
     async openProject(id) {
@@ -266,29 +271,29 @@ class MeowSpeechKit {
             
             this.currentProject = project;
             this.segments = project.segments || [];
+            this.targetDuration = project.targetDuration || null;
             this.showMainSection();
             
-            document.getElementById('script-title').value = project.title;
-            document.getElementById('script-content').value = project.content;
+            document.getElementById('script-title').value = project.title || '';
+            document.getElementById('script-content').value = project.content || '';
+            document.getElementById('target-duration').value = project.targetDuration || '';
             
             if (this.segments.length > 0) {
                 this.displaySegments();
+                this.calculateAndDisplayTotalDuration();
                 document.getElementById('play-btn').disabled = false;
             }
         } catch (error) {
             console.error('Failed to open project:', error);
-            alert('Failed to open project');
+            alert('打开项目失败');
         }
     }
     
     async deleteProject(id) {
-        if (!confirm('Are you sure you want to delete this project?')) return;
+        if (!confirm('确定要删除这个项目吗？')) return;
         
         try {
-            const response = await fetch(`/api/scripts/${id}`, {
-                method: 'DELETE'
-            });
-            
+            const response = await fetch(`/api/scripts/${id}`, { method: 'DELETE' });
             if (response.ok) {
                 await this.loadProjects();
             }
@@ -298,8 +303,9 @@ class MeowSpeechKit {
     }
     
     async saveCurrentProject() {
-        const title = document.getElementById('script-title').value || 'Untitled';
+        const title = document.getElementById('script-title').value || '未命名项目';
         const content = document.getElementById('script-content').value;
+        const targetDuration = parseInt(document.getElementById('target-duration').value) || null;
         
         try {
             const response = await fetch('/api/scripts', {
@@ -309,19 +315,21 @@ class MeowSpeechKit {
                     id: this.currentProject?.id,
                     title,
                     content,
-                    segments: this.segments
+                    segments: this.segments,
+                    targetDuration
                 })
             });
             
             const data = await response.json();
             
             if (response.ok) {
-                this.currentProject = { ...this.currentProject, id: data.id, title, content };
-                alert('Project saved successfully!');
+                this.currentProject = { ...this.currentProject, id: data.id, title, content, segments: this.segments, targetDuration };
+                document.getElementById('current-project-name').textContent = `项目：${title}`;
+                alert('项目保存成功！');
             }
         } catch (error) {
             console.error('Failed to save project:', error);
-            alert('Failed to save project');
+            alert('保存项目失败');
         }
     }
     
@@ -331,9 +339,8 @@ class MeowSpeechKit {
         document.getElementById('main-section').classList.remove('hidden');
         document.getElementById('teleprompter-section').classList.add('hidden');
         
-        document.getElementById('user-info').textContent = `Welcome, ${this.currentUser}`;
-        document.getElementById('current-project-name').textContent = 
-            `Project: ${this.currentProject?.title || 'New Project'}`;
+        document.getElementById('user-info').textContent = `欢迎，${this.currentUser}`;
+        document.getElementById('current-project-name').textContent = `项目：${this.currentProject?.title || '新项目'}`;
         
         await this.loadModels();
         await this.updateRateLimitInfo();
@@ -351,9 +358,7 @@ class MeowSpeechKit {
                 const option = document.createElement('option');
                 option.value = model.id;
                 option.textContent = model.name;
-                if (model.id === data.defaultModel) {
-                    option.selected = true;
-                }
+                if (model.id === data.defaultModel) option.selected = true;
                 select.appendChild(option);
             });
         } catch (error) {
@@ -377,9 +382,8 @@ class MeowSpeechKit {
         try {
             const response = await fetch('/api/rate-limit');
             const data = await response.json();
-            
             document.getElementById('rate-limit-info').textContent = 
-                `AI calls: ${data.used}/${data.limit} (${data.remaining} remaining)`;
+                `AI调用次数：${data.used}/${data.limit}（剩余 ${data.remaining} 次）`;
         } catch (error) {
             console.error('Failed to get rate limit:', error);
         }
@@ -391,9 +395,11 @@ class MeowSpeechKit {
         const modelId = document.getElementById('model-select').value;
         
         if (!content) {
-            alert('Please enter some text to process.');
+            alert('请输入演讲稿内容');
             return;
         }
+        
+        this.targetDuration = parseInt(targetDuration) || null;
         
         const statusEl = document.getElementById('processing-status');
         const progressFill = statusEl.querySelector('.progress-fill');
@@ -401,15 +407,14 @@ class MeowSpeechKit {
         
         statusEl.classList.remove('hidden');
         progressFill.style.width = '10%';
-        processingText.textContent = 'Connecting to AI...';
-        
+        processingText.textContent = '正在连接 AI...';
         document.getElementById('process-btn').disabled = true;
         
         try {
             const response = await fetch('/api/process-text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: content, modelId, targetDuration: parseInt(targetDuration) || null })
+                body: JSON.stringify({ text: content, modelId, targetDuration: this.targetDuration })
             });
             
             if (!response.ok) {
@@ -424,7 +429,6 @@ class MeowSpeechKit {
             
             while (true) {
                 const { done, value } = await reader.read();
-                
                 if (done) break;
                 
                 const chunk = decoder.decode(value);
@@ -439,138 +443,185 @@ class MeowSpeechKit {
                                 fullContent += data.content;
                                 progress = Math.min(progress + 2, 90);
                                 progressFill.style.width = `${progress}%`;
-                                processingText.textContent = 'Processing with AI...';
+                                processingText.textContent = '正在使用 AI 处理...';
                             }
                             
                             if (data.done) {
                                 progressFill.style.width = '100%';
-                                processingText.textContent = 'Complete!';
-                                
-                                // Parse the content
+                                processingText.textContent = '处理完成！';
                                 const jsonContent = data.content || fullContent;
                                 this.parseAndDisplaySegments(jsonContent);
-                                
-                                setTimeout(() => {
-                                    statusEl.classList.add('hidden');
-                                }, 1500);
+                                setTimeout(() => statusEl.classList.add('hidden'), 1500);
                             }
                             
-                            if (data.error) {
-                                throw new Error(data.error);
-                            }
+                            if (data.error) throw new Error(data.error);
                         } catch (e) {
-                            if (e.message !== 'Unexpected end of JSON input') {
-                                console.error('Parse error:', e);
-                            }
+                            if (e.message !== 'Unexpected end of JSON input') console.error('Parse error:', e);
                         }
                     }
                 }
             }
-            
         } catch (error) {
             console.error('Processing error:', error);
-            processingText.textContent = `Error: ${error.message}`;
+            processingText.textContent = `错误：${error.message}`;
             progressFill.style.width = '0%';
-            
-            // Fallback: simple local segmentation
-            this.localSegmentation(content, targetDuration);
-            
-            setTimeout(() => {
-                statusEl.classList.add('hidden');
-            }, 3000);
+            this.showErrorModal(error.message);
+            this.localSegmentation(content, this.targetDuration);
+            setTimeout(() => statusEl.classList.add('hidden'), 3000);
         } finally {
             document.getElementById('process-btn').disabled = false;
             await this.updateRateLimitInfo();
         }
     }
     
+    showErrorModal(message) {
+        document.getElementById('error-modal-message').textContent = `处理时发生错误：${message}。建议尝试更换其他 AI 模型。`;
+        document.getElementById('error-modal').classList.remove('hidden');
+    }
+    
+    closeErrorModal() {
+        document.getElementById('error-modal').classList.add('hidden');
+    }
+    
     parseAndDisplaySegments(content) {
         try {
-            // Try to extract JSON from the content
             let jsonStr = content;
-            
-            // Look for JSON object in the content
             const jsonMatch = content.match(/\{[\s\S]*"segments"[\s\S]*\}/);
-            if (jsonMatch) {
-                jsonStr = jsonMatch[0];
-            }
+            if (jsonMatch) jsonStr = jsonMatch[0];
             
             const parsed = JSON.parse(jsonStr);
             this.segments = parsed.segments || [];
             
-            // Convert seconds to milliseconds if needed
             this.segments = this.segments.map(seg => ({
                 text: seg.text,
-                duration: seg.duration < SECONDS_TO_MS_THRESHOLD ? seg.duration * 1000 : seg.duration
+                duration: seg.duration < SECONDS_TO_MS_THRESHOLD ? seg.duration * 1000 : seg.duration,
+                hasPause: !!seg.text.match(/[.!?。！？,，;；:：]$/)
+            }));
+            
+            this.segments = this.segments.map(seg => ({
+                ...seg,
+                duration: seg.hasPause ? seg.duration + PAUSE_DURATION_MS : seg.duration
             }));
             
             this.displaySegments();
+            this.calculateAndDisplayTotalDuration();
         } catch (error) {
             console.error('Failed to parse segments:', error);
-            // Fallback to local segmentation
             const content = document.getElementById('script-content').value.trim();
             this.localSegmentation(content);
         }
     }
     
     localSegmentation(text, targetDuration) {
-        // Split into short phrases (2-3 words each)
         const words = text.split(/\s+/).filter(w => w.trim());
         this.segments = [];
         
         const totalWords = words.length;
         const targetMs = targetDuration ? targetDuration * 1000 : null;
-        
-        // Calculate milliseconds per word based on speaking rate
         const msPerWord = targetMs ? (targetMs / totalWords) : MS_PER_WORD;
         
-        // Group words into phrases of 2-3 words
         let currentPhrase = [];
-        let phraseWordLimit = 2; // Start with 2, alternate between 2 and 3
+        let phraseWordLimit = 2;
         
         for (let i = 0; i < words.length; i++) {
             currentPhrase.push(words[i]);
-            
-            // Check if we should end the phrase
-            const shouldEnd = currentPhrase.length >= phraseWordLimit ||
-                              i === words.length - 1 ||
-                              words[i].match(/[.!?。！？,，;；:：]$/);
+            const endsWithPunctuation = words[i].match(/[.!?。！？,，;；:：]$/);
+            const shouldEnd = currentPhrase.length >= phraseWordLimit || i === words.length - 1 || endsWithPunctuation;
             
             if (shouldEnd && currentPhrase.length > 0) {
                 const phraseText = currentPhrase.join(' ');
-                const duration = Math.round(currentPhrase.length * msPerWord);
+                let duration = Math.round(currentPhrase.length * msPerWord);
+                if (endsWithPunctuation) duration += PAUSE_DURATION_MS;
                 
                 this.segments.push({
                     text: phraseText,
-                    duration: Math.max(MIN_PHRASE_DURATION_MS, duration)
+                    duration: Math.max(MIN_PHRASE_DURATION_MS, duration),
+                    hasPause: !!endsWithPunctuation
                 });
                 
                 currentPhrase = [];
-                // Alternate between 2 and 3 word phrases
                 phraseWordLimit = phraseWordLimit === 2 ? 3 : 2;
             }
         }
         
         this.displaySegments();
+        this.calculateAndDisplayTotalDuration();
+    }
+    
+    calculateAndDisplayTotalDuration() {
+        const totalMs = this.segments.reduce((sum, seg) => sum + seg.duration, 0);
+        const totalSeconds = Math.round(totalMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        
+        document.getElementById('total-duration-text').textContent = `分词后总时长：${minutes}分${seconds}秒`;
+        
+        if (this.targetDuration) {
+            const targetMs = this.targetDuration * 1000;
+            const suggestedSpeed = Math.round((totalMs / targetMs) * 100) / 100;
+            const clampedSpeed = Math.max(0.5, Math.min(2.0, suggestedSpeed));
+            
+            document.getElementById('speed-suggestion').textContent = 
+                `建议播放速度：${clampedSpeed.toFixed(1)}x（匹配目标时长 ${this.targetDuration} 秒）`;
+            
+            document.getElementById('speed').value = clampedSpeed;
+            document.getElementById('speed-value').textContent = `${clampedSpeed.toFixed(1)}x`;
+            this.playbackSpeed = clampedSpeed;
+        } else {
+            document.getElementById('speed-suggestion').textContent = '';
+        }
+        
+        document.getElementById('total-duration-info').classList.remove('hidden');
     }
     
     displaySegments() {
         const previewEl = document.getElementById('segments-preview');
         
         if (this.segments.length === 0) {
-            previewEl.innerHTML = '<p class="placeholder-text">No segments generated</p>';
+            previewEl.innerHTML = '<p class="placeholder-text">未生成分段</p>';
             document.getElementById('play-btn').disabled = true;
             return;
         }
         
         previewEl.innerHTML = this.segments.map((segment, index) => `
-            <div class="segment-item" style="animation-delay: ${index * 0.05}s">
+            <div class="segment-item" data-index="${index}" style="animation-delay: ${index * 0.05}s">
                 <p class="segment-text">${this.escapeHtml(segment.text)}</p>
-                <span class="segment-duration">${segment.duration}ms</span>
+                <span class="segment-duration">${segment.duration}ms${segment.hasPause ? ' (含停顿)' : ''}</span>
             </div>
         `).join('');
         
+        previewEl.querySelectorAll('.segment-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const index = parseInt(item.dataset.index);
+                this.openDurationModal(index);
+            });
+        });
+        
         document.getElementById('play-btn').disabled = false;
+    }
+    
+    openDurationModal(index) {
+        this.editingSegmentIndex = index;
+        const segment = this.segments[index];
+        document.getElementById('duration-modal-text').textContent = `"${segment.text}"`;
+        document.getElementById('duration-input').value = segment.duration;
+        document.getElementById('duration-modal').classList.remove('hidden');
+    }
+    
+    closeDurationModal() {
+        document.getElementById('duration-modal').classList.add('hidden');
+        this.editingSegmentIndex = null;
+    }
+    
+    saveDuration() {
+        if (this.editingSegmentIndex === null) return;
+        const newDuration = parseInt(document.getElementById('duration-input').value);
+        if (newDuration && newDuration >= 100) {
+            this.segments[this.editingSegmentIndex].duration = newDuration;
+            this.displaySegments();
+            this.calculateAndDisplayTotalDuration();
+        }
+        this.closeDurationModal();
     }
     
     escapeHtml(text) {
@@ -585,12 +636,9 @@ class MeowSpeechKit {
         document.getElementById('main-section').classList.add('hidden');
         document.getElementById('teleprompter-section').classList.remove('hidden');
         
-        // Request fullscreen
         const teleprompterEl = document.getElementById('teleprompter-section');
         if (teleprompterEl.requestFullscreen) {
-            teleprompterEl.requestFullscreen().catch(err => {
-                console.log('Fullscreen not available:', err);
-            });
+            teleprompterEl.requestFullscreen().catch(err => console.log('Fullscreen not available:', err));
         }
         
         this.currentSegmentIndex = 0;
@@ -599,6 +647,7 @@ class MeowSpeechKit {
         this.isPlaying = true;
         this.isPaused = false;
         
+        document.getElementById('pause-btn').textContent = '暂停';
         this.renderTeleprompterContent();
         this.startCountdown();
     }
@@ -606,12 +655,9 @@ class MeowSpeechKit {
     renderTeleprompterContent() {
         const contentEl = document.getElementById('teleprompter-content');
         const n = this.candidateLines;
-        
         let html = '';
         
-        // Add spacer divs to ensure first phrase is centered
-        const spacerCount = n;
-        for (let i = 0; i < spacerCount; i++) {
+        for (let i = 0; i < n; i++) {
             html += `<div class="teleprompter-line spacer" style="font-size: ${this.fontSize}px; opacity: 0;">&nbsp;</div>`;
         }
         
@@ -619,19 +665,14 @@ class MeowSpeechKit {
             const diff = Math.abs(i - this.currentSegmentIndex);
             let className = 'teleprompter-line';
             
-            if (i === this.currentSegmentIndex) {
-                className += ' current';
-            } else if (diff <= n) {
-                className += ` adjacent-${diff}`;
-            } else {
-                className += ' hidden-line';
-            }
+            if (i === this.currentSegmentIndex) className += ' current';
+            else if (diff <= n) className += ` adjacent-${diff}`;
+            else className += ' hidden-line';
             
             html += `<div class="${className}" style="font-size: ${this.fontSize}px">${this.escapeHtml(this.segments[i].text)}</div>`;
         }
         
-        // Add spacer divs at the end too
-        for (let i = 0; i < spacerCount; i++) {
+        for (let i = 0; i < n; i++) {
             html += `<div class="teleprompter-line spacer" style="font-size: ${this.fontSize}px; opacity: 0;">&nbsp;</div>`;
         }
         
@@ -644,12 +685,10 @@ class MeowSpeechKit {
         
         this.timerInterval = setInterval(() => {
             if (this.isPaused) return;
-            
             if (this.countdownSeconds > 0) {
                 timerEl.textContent = this.countdownSeconds;
                 this.countdownSeconds--;
             } else {
-                // Start actual playback
                 clearInterval(this.timerInterval);
                 this.startPlayback();
             }
@@ -659,13 +698,9 @@ class MeowSpeechKit {
     startPlayback() {
         const timerEl = document.getElementById('timer-value');
         timerEl.className = 'running';
-        
         this.updateTimer();
-        
-        // Start segment timing
         this.scheduleNextSegment();
         
-        // Start elapsed timer (update every 100ms for smoother display)
         this.timerInterval = setInterval(() => {
             if (this.isPaused) return;
             this.elapsedMs += 100;
@@ -680,16 +715,13 @@ class MeowSpeechKit {
         }
         
         const segment = this.segments[this.currentSegmentIndex];
-        // Duration is in milliseconds, adjust for playback speed
         const duration = segment.duration / this.playbackSpeed;
         
         this.playbackInterval = setTimeout(() => {
             if (this.isPaused) {
-                // Re-schedule when paused
                 this.scheduleNextSegment();
                 return;
             }
-            
             this.currentSegmentIndex++;
             this.renderTeleprompterContent();
             this.scheduleNextSegment();
@@ -708,7 +740,7 @@ class MeowSpeechKit {
     togglePause() {
         this.isPaused = !this.isPaused;
         const pauseBtn = document.getElementById('pause-btn');
-        pauseBtn.textContent = this.isPaused ? 'Resume' : 'Pause';
+        pauseBtn.textContent = this.isPaused ? '继续' : '暂停';
         pauseBtn.classList.toggle('btn-success', this.isPaused);
         pauseBtn.classList.toggle('btn-warning', !this.isPaused);
     }
@@ -720,6 +752,9 @@ class MeowSpeechKit {
         
         const timerEl = document.getElementById('timer-value');
         timerEl.classList.add('finished');
+        
+        // Auto-exit fullscreen after 5 seconds
+        setTimeout(() => this.exitTeleprompter(), 5000);
     }
     
     exitTeleprompter() {
@@ -727,18 +762,14 @@ class MeowSpeechKit {
         clearTimeout(this.playbackInterval);
         this.isPlaying = false;
         
-        // Exit fullscreen
         if (document.fullscreenElement) {
-            document.exitFullscreen().catch(err => {
-                console.log('Exit fullscreen error:', err);
-            });
+            document.exitFullscreen().catch(err => console.log('Exit fullscreen error:', err));
         }
         
         document.getElementById('teleprompter-section').classList.add('hidden');
         document.getElementById('main-section').classList.remove('hidden');
         
-        // Reset controls
-        document.getElementById('pause-btn').textContent = 'Pause';
+        document.getElementById('pause-btn').textContent = '暂停';
         document.getElementById('pause-btn').classList.remove('btn-success');
         document.getElementById('pause-btn').classList.add('btn-warning');
     }
@@ -746,10 +777,7 @@ class MeowSpeechKit {
     updateFontSize(value) {
         this.fontSize = parseInt(value);
         document.getElementById('font-size-value').textContent = `${value}px`;
-        
-        if (this.isPlaying) {
-            this.renderTeleprompterContent();
-        }
+        if (this.isPlaying) this.renderTeleprompterContent();
     }
     
     updateSpeed(value) {
@@ -760,10 +788,7 @@ class MeowSpeechKit {
     updateCandidateLines(value) {
         this.candidateLines = parseInt(value);
         document.getElementById('candidate-lines-value').textContent = value;
-        
-        if (this.isPlaying) {
-            this.renderTeleprompterContent();
-        }
+        if (this.isPlaying) this.renderTeleprompterContent();
     }
     
     toggleDarkMode() {
@@ -772,7 +797,7 @@ class MeowSpeechKit {
         teleprompterEl.classList.toggle('dark-mode', this.isDarkMode);
         
         const toggleBtn = document.getElementById('dark-mode-toggle');
-        toggleBtn.textContent = this.isDarkMode ? 'On' : 'Off';
+        toggleBtn.textContent = this.isDarkMode ? '开' : '关';
         toggleBtn.classList.toggle('active', this.isDarkMode);
     }
     

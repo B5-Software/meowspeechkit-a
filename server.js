@@ -37,6 +37,9 @@ const RATE_LIMITS_FILE = path.join(DATA_DIR, 'rate_limits.csv');
 const SCRIPTS_FILE = path.join(DATA_DIR, 'scripts.csv');
 const AI_CONFIG_FILE = path.join(__dirname, 'config', 'ai-models.json');
 
+// CSV headers constants
+const SCRIPTS_HEADERS = SCRIPTS_HEADERS;
+
 // Helper functions for CSV operations
 function readCSV(filePath) {
     try {
@@ -297,15 +300,15 @@ app.post('/api/process-text', requireAuth, async (req, res) => {
         res.setHeader('X-Accel-Buffering', 'no');
         
         const durationInfo = targetDuration 
-            ? `The total duration should be approximately ${targetDuration * 1000} milliseconds (${targetDuration} seconds).` 
+            ? `总时长应约为 ${targetDuration * 1000} 毫秒（${targetDuration} 秒）。` 
             : '';
         
-        const prompt = `Please segment the following speech text into SHORT PHRASES (2-3 words each) for a teleprompter. ${durationInfo}
+        const prompt = `请将以下演讲文本分割成适合提词器显示的短语（每段2-3个词）。${durationInfo}
 
-Speech text:
+演讲文本：
 ${text}
 
-Output the result as JSON with segments array containing text and duration (in MILLISECONDS) for each segment. Each 2-word phrase should be around 800ms, each 3-word phrase around 1200ms.`;
+请以JSON格式输出，包含segments数组，每个元素包含text（文本）和duration（时长，毫秒）。2词短语约800毫秒，3词短语约1200毫秒。在标点符号后添加适当停顿。`;
 
         // Make API request to AI model
         const requestBody = JSON.stringify({
@@ -443,7 +446,7 @@ function generateLocalSegments(text, targetDuration) {
 // Save script
 app.post('/api/scripts', requireAuth, (req, res) => {
     try {
-        const { id, title, content, segments } = req.body;
+        const { id, title, content, segments, targetDuration } = req.body;
         const userId = req.session.userId;
         
         const scripts = readCSV(SCRIPTS_FILE);
@@ -453,30 +456,32 @@ app.post('/api/scripts', requireAuth, (req, res) => {
             // Update existing script
             scripts[existingIndex] = {
                 ...scripts[existingIndex],
-                title: title || 'Untitled',
+                title: title || '未命名项目',
                 content: content || '',
-                segments: JSON.stringify(segments || [])
+                segments: JSON.stringify(segments || []),
+                targetDuration: targetDuration || ''
             };
             
-            writeCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], scripts);
+            writeCSV(SCRIPTS_FILE, SCRIPTS_HEADERS, scripts);
             res.json({ success: true, id: scripts[existingIndex].id });
         } else {
             // Create new script
             const script = {
                 id: uuidv4(),
                 userId: userId,
-                title: title || 'Untitled',
+                title: title || '未命名项目',
                 content: content || '',
                 segments: JSON.stringify(segments || []),
+                targetDuration: targetDuration || '',
                 createdAt: new Date().toISOString()
             };
             
-            appendCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], script);
+            appendCSV(SCRIPTS_FILE, SCRIPTS_HEADERS, script);
             res.json({ success: true, id: script.id });
         }
     } catch (error) {
         console.error('Save script error:', error);
-        res.status(500).json({ error: 'Failed to save script' });
+        res.status(500).json({ error: '保存项目失败' });
     }
 });
 
@@ -493,7 +498,7 @@ app.get('/api/scripts', requireAuth, (req, res) => {
         })));
     } catch (error) {
         console.error('Get scripts error:', error);
-        res.status(500).json({ error: 'Failed to get scripts' });
+        res.status(500).json({ error: '获取项目列表失败' });
     }
 });
 
@@ -505,7 +510,7 @@ app.get('/api/scripts/:id', requireAuth, (req, res) => {
         const script = scripts.find(s => s.id === req.params.id && s.userId === userId);
         
         if (!script) {
-            return res.status(404).json({ error: 'Script not found' });
+            return res.status(404).json({ error: '项目未找到' });
         }
         
         res.json({
@@ -513,11 +518,12 @@ app.get('/api/scripts/:id', requireAuth, (req, res) => {
             title: script.title,
             content: script.content,
             segments: JSON.parse(script.segments || '[]'),
+            targetDuration: script.targetDuration ? parseInt(script.targetDuration) : null,
             createdAt: script.createdAt
         });
     } catch (error) {
         console.error('Get script error:', error);
-        res.status(500).json({ error: 'Failed to get script' });
+        res.status(500).json({ error: '获取项目失败' });
     }
 });
 
@@ -529,14 +535,14 @@ app.delete('/api/scripts/:id', requireAuth, (req, res) => {
         const filteredScripts = scripts.filter(s => !(s.id === req.params.id && s.userId === userId));
         
         if (filteredScripts.length === scripts.length) {
-            return res.status(404).json({ error: 'Script not found' });
+            return res.status(404).json({ error: '项目未找到' });
         }
         
-        writeCSV(SCRIPTS_FILE, ['id', 'userId', 'title', 'content', 'segments', 'createdAt'], filteredScripts);
+        writeCSV(SCRIPTS_FILE, SCRIPTS_HEADERS, filteredScripts);
         res.json({ success: true });
     } catch (error) {
         console.error('Delete script error:', error);
-        res.status(500).json({ error: 'Failed to delete script' });
+        res.status(500).json({ error: '删除项目失败' });
     }
 });
 
