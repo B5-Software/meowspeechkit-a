@@ -1,0 +1,27 @@
+{
+  "models": [
+    {
+      "id": "gpt-4",
+      "name": "GPT-4",
+      "apiUrl": "https://api.openai.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "maxTokens": 4096
+    },
+    {
+      "id": "gpt-3.5-turbo",
+      "name": "GPT-3.5 Turbo",
+      "apiUrl": "https://api.openai.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "maxTokens": 4096
+    },
+    {
+      "id": "claude-3",
+      "name": "Claude 3",
+      "apiUrl": "https://api.anthropic.com/v1/messages",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "maxTokens": 4096
+    }
+  ],
+  "defaultModel": "gpt-3.5-turbo",
+  "systemPrompt": "You are a professional speech text processor. Your task is to segment the given speech text into appropriate phrases for a teleprompter display. Each phrase should be natural for speaking and take approximately 2-4 seconds to read. Output in the following JSON format:\n{\"segments\": [{\"text\": \"phrase text\", \"duration\": seconds_as_number}]}\nEnsure the segments flow naturally for a speaker reading them aloud."
+}

@@ -1,0 +1,24 @@
+{
+  "name": "meowspeechkit-a",
+  "version": "1.0.0",
+  "description": "A vertical scrolling teleprompter web application with AI-powered text processing",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "teleprompter",
+    "speech",
+    "ai",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "uuid": "^9.0.0"
+  }
+}
