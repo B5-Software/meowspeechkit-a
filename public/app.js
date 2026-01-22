@@ -30,6 +30,7 @@ class MeowSpeechKit {
         this.isRehearsalMode = false;
         this.rehearsalTimings = [];
         this.lastSegmentStartTime = 0;
+        this.rehearsalElapsedBase = 0;
         
         // Auto-save properties
         this.autoSaveInterval = null;
@@ -1202,6 +1203,7 @@ class MeowSpeechKit {
         this.isRehearsalMode = true;
         this.rehearsalTimings = [];
         this.lastSegmentStartTime = 0;
+        this.rehearsalElapsedBase = 0;
         this.currentSegmentIndex = 0;
         this.elapsedMs = 0;
         this.countdownSeconds = 10;
@@ -1242,11 +1244,11 @@ class MeowSpeechKit {
         
         this.lastSegmentStartTime = Date.now();
         this.elapsedMs = 0;
+        this.rehearsalElapsedBase = 0; // Track accumulated time from completed segments
         
         // Start timer
         this.timerInterval = setInterval(() => {
-            this.elapsedMs = Date.now() - this.lastSegmentStartTime + 
-                this.rehearsalTimings.reduce((sum, t) => sum + t, 0);
+            this.elapsedMs = Date.now() - this.lastSegmentStartTime + this.rehearsalElapsedBase;
             this.updateTimer();
         }, 100);
     }
@@ -1260,6 +1262,9 @@ class MeowSpeechKit {
         
         // Store the timing
         this.rehearsalTimings[this.currentSegmentIndex] = segmentDuration;
+        
+        // Update accumulated base time
+        this.rehearsalElapsedBase += segmentDuration;
         
         // Move to next segment
         if (this.currentSegmentIndex < this.segments.length - 1) {
@@ -1278,11 +1283,16 @@ class MeowSpeechKit {
         if (!this.isRehearsalMode || this.countdownSeconds > 0) return;
         
         if (this.currentSegmentIndex > 0) {
-            // Don't record timing for current segment when going back
+            // Clear the timing for the current segment (we're going back)
+            this.rehearsalTimings[this.currentSegmentIndex] = undefined;
             this.currentSegmentIndex--;
             this.lastSegmentStartTime = Date.now();
-            // Remove the timing for the segment we're going back to
-            this.rehearsalTimings.pop();
+            // Also clear the timing for the segment we're going back to and recalculate base
+            const prevTiming = this.rehearsalTimings[this.currentSegmentIndex];
+            if (prevTiming !== undefined && prevTiming > 0) {
+                this.rehearsalElapsedBase -= prevTiming;
+            }
+            this.rehearsalTimings[this.currentSegmentIndex] = undefined;
             this.renderTeleprompterContent();
             document.getElementById('rehearsal-status-text').textContent = 
                 `排练录制中 (${this.currentSegmentIndex + 1}/${this.segments.length})`;
@@ -1293,8 +1303,8 @@ class MeowSpeechKit {
         clearInterval(this.timerInterval);
         this.isPlaying = false;
         
-        // Calculate total time
-        const totalMs = this.rehearsalTimings.reduce((sum, t) => sum + t, 0);
+        // Calculate total time (filter out undefined values)
+        const totalMs = this.rehearsalTimings.reduce((sum, t) => sum + (t || 0), 0);
         const totalSeconds = Math.round(totalMs / 1000);
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
@@ -1308,9 +1318,9 @@ class MeowSpeechKit {
     }
     
     saveRehearsalTiming() {
-        // Apply recorded timings to segments
+        // Apply recorded timings to segments (only valid positive values)
         for (let i = 0; i < this.rehearsalTimings.length; i++) {
-            if (this.rehearsalTimings[i] !== undefined) {
+            if (this.rehearsalTimings[i] !== undefined && this.rehearsalTimings[i] > 0) {
                 this.segments[i].duration = Math.max(MIN_PHRASE_DURATION_MS, this.rehearsalTimings[i]);
             }
         }

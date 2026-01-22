@@ -519,6 +519,11 @@ function generateLocalSegments(text, targetDuration) {
     return { segments };
 }
 
+// Helper function to convert boolean to CSV string
+function boolToStr(value) {
+    return value ? 'true' : 'false';
+}
+
 // Save script
 app.post('/api/scripts', requireAuth, (req, res) => {
     try {
@@ -536,7 +541,7 @@ app.post('/api/scripts', requireAuth, (req, res) => {
                 content: content || '',
                 segments: JSON.stringify(segments || []),
                 targetDuration: targetDuration || '',
-                isRehearsalTiming: isRehearsalTiming ? 'true' : 'false'
+                isRehearsalTiming: boolToStr(isRehearsalTiming)
             };
             
             writeCSV(SCRIPTS_FILE, SCRIPTS_HEADERS, scripts);
@@ -550,7 +555,7 @@ app.post('/api/scripts', requireAuth, (req, res) => {
                 content: content || '',
                 segments: JSON.stringify(segments || []),
                 targetDuration: targetDuration || '',
-                isRehearsalTiming: isRehearsalTiming ? 'true' : 'false',
+                isRehearsalTiming: boolToStr(isRehearsalTiming),
                 createdAt: new Date().toISOString()
             };
             
