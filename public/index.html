@@ -119,11 +119,17 @@
                         <button id="process-btn" class="btn btn-primary">AI 分词</button>
                         <button id="save-project-btn" class="btn btn-secondary">保存项目</button>
                         <button id="play-btn" class="btn btn-success" disabled>播放提词器</button>
+                        <button id="rehearsal-btn" class="btn btn-warning" disabled>排练计时</button>
+                    </div>
+                    
+                    <div id="save-status" class="save-status">
+                        <span id="save-status-text">未保存</span>
                     </div>
                     
                     <div id="total-duration-info" class="total-duration-info hidden">
                         <span id="total-duration-text"></span>
                         <span id="speed-suggestion"></span>
+                        <span id="timing-source"></span>
                     </div>
                     
                     <div id="system-prompt-section" class="system-prompt-section">
@@ -177,6 +183,7 @@
                 
                 <div class="control-group">
                     <button id="pause-btn" class="btn btn-warning">暂停</button>
+                    <button id="next-word-btn" class="btn btn-primary hidden">下一词</button>
                     <button id="exit-btn" class="btn btn-danger">退出</button>
                 </div>
             </div>
@@ -189,6 +196,10 @@
             
             <div id="timer-display" class="timer-display">
                 <span id="timer-value">--:--</span>
+            </div>
+            
+            <div id="rehearsal-status" class="rehearsal-status hidden">
+                <span id="rehearsal-status-text">排练录制中...</span>
             </div>
         </div>
         
@@ -215,6 +226,41 @@
                 <div class="modal-buttons">
                     <button id="duration-modal-cancel" class="btn btn-secondary">取消</button>
                     <button id="duration-modal-save" class="btn btn-primary">保存</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Rehearsal Tutorial Modal -->
+        <div id="rehearsal-modal" class="modal hidden">
+            <div class="modal-content modal-wide">
+                <h3>排练计时</h3>
+                <div class="rehearsal-tutorial">
+                    <p><strong>排练计时功能说明：</strong></p>
+                    <ul>
+                        <li>进入排练模式后，会先倒数 10 秒让您准备</li>
+                        <li>开始后，按 <kbd>↓</kbd> 下箭头键或点击左下角的"下一词"按钮来标记当前词的结束时间</li>
+                        <li>您也可以按 <kbd>↑</kbd> 上箭头键回退到上一个词</li>
+                        <li>按 <kbd>Esc</kbd> 键可以随时退出排练</li>
+                        <li>完成整篇演讲稿后，可以选择保存或舍弃录制的时间配置</li>
+                    </ul>
+                    <p class="rehearsal-note">提示：排练计时后的时间配置不会自动缩放到目标时长，将直接使用您录制的时间。</p>
+                </div>
+                <div class="modal-buttons">
+                    <button id="rehearsal-modal-cancel" class="btn btn-secondary">取消</button>
+                    <button id="rehearsal-modal-start" class="btn btn-primary">开始排练</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Rehearsal Complete Modal -->
+        <div id="rehearsal-complete-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>排练完成</h3>
+                <p id="rehearsal-complete-text">您已完成整篇演讲稿的排练计时。</p>
+                <p id="rehearsal-total-time"></p>
+                <div class="modal-buttons">
+                    <button id="rehearsal-discard-btn" class="btn btn-secondary">舍弃</button>
+                    <button id="rehearsal-save-btn" class="btn btn-primary">保存时间配置</button>
                 </div>
             </div>
         </div>

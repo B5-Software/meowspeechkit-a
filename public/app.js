@@ -24,6 +24,19 @@ class MeowSpeechKit {
         this.isDarkMode = false;
         this.targetDuration = null;
         this.editingSegmentIndex = null;
+        this.isRehearsalTiming = false;
+        
+        // Rehearsal mode properties
+        this.isRehearsalMode = false;
+        this.rehearsalTimings = [];
+        this.lastSegmentStartTime = 0;
+        this.rehearsalElapsedBase = 0;
+        
+        // Auto-save properties
+        this.autoSaveInterval = null;
+        this.hasUnsavedChanges = false;
+        this.lastSaveTime = null;
+        this.isSaving = false;
         
         this.init();
     }
@@ -67,18 +80,33 @@ class MeowSpeechKit {
         // Play button
         document.getElementById('play-btn').addEventListener('click', () => this.startTeleprompter());
         
+        // Rehearsal button
+        document.getElementById('rehearsal-btn').addEventListener('click', () => this.showRehearsalModal());
+        
         // Teleprompter controls
         document.getElementById('font-size').addEventListener('input', (e) => this.updateFontSize(e.target.value));
         document.getElementById('speed').addEventListener('input', (e) => this.updateSpeed(e.target.value));
         document.getElementById('candidate-lines').addEventListener('input', (e) => this.updateCandidateLines(e.target.value));
         document.getElementById('dark-mode-toggle').addEventListener('click', () => this.toggleDarkMode());
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
+        document.getElementById('next-word-btn').addEventListener('click', () => this.handleRehearsalNextWord());
         document.getElementById('exit-btn').addEventListener('click', () => this.exitTeleprompter());
         
         // Modal events
         document.getElementById('error-modal-close').addEventListener('click', () => this.closeErrorModal());
         document.getElementById('duration-modal-cancel').addEventListener('click', () => this.closeDurationModal());
         document.getElementById('duration-modal-save').addEventListener('click', () => this.saveDuration());
+        
+        // Rehearsal modal events
+        document.getElementById('rehearsal-modal-cancel').addEventListener('click', () => this.closeRehearsalModal());
+        document.getElementById('rehearsal-modal-start').addEventListener('click', () => this.startRehearsalMode());
+        document.getElementById('rehearsal-save-btn').addEventListener('click', () => this.saveRehearsalTiming());
+        document.getElementById('rehearsal-discard-btn').addEventListener('click', () => this.discardRehearsalTiming());
+        
+        // Track changes for auto-save
+        document.getElementById('script-title').addEventListener('input', () => this.markUnsaved());
+        document.getElementById('script-content').addEventListener('input', () => this.markUnsaved());
+        document.getElementById('target-duration').addEventListener('input', () => this.markUnsaved());
         
         // Keyboard shortcuts for teleprompter
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
@@ -176,6 +204,7 @@ class MeowSpeechKit {
     }
     
     showAuthSection() {
+        this.stopAutoSave();
         document.getElementById('auth-section').classList.remove('hidden');
         document.getElementById('projects-section').classList.add('hidden');
         document.getElementById('main-section').classList.add('hidden');
@@ -183,6 +212,12 @@ class MeowSpeechKit {
     }
     
     async showProjectsSection() {
+        // Save any pending changes before leaving
+        if (this.hasUnsavedChanges && this.currentProject) {
+            await this.saveCurrentProject(true);
+        }
+        this.stopAutoSave();
+        
         document.getElementById('auth-section').classList.add('hidden');
         document.getElementById('projects-section').classList.remove('hidden');
         document.getElementById('main-section').classList.add('hidden');
@@ -251,9 +286,11 @@ class MeowSpeechKit {
     }
     
     createNewProject() {
-        this.currentProject = { id: null, title: '新项目', content: '', segments: [], targetDuration: null };
+        this.currentProject = { id: null, title: '新项目', content: '', segments: [], targetDuration: null, isRehearsalTiming: false };
         this.segments = [];
         this.targetDuration = null;
+        this.isRehearsalTiming = false;
+        this.hasUnsavedChanges = false;
         this.showMainSection();
         
         document.getElementById('script-title').value = '';
@@ -261,7 +298,9 @@ class MeowSpeechKit {
         document.getElementById('target-duration').value = '';
         document.getElementById('segments-preview').innerHTML = '<p class="placeholder-text">请先进行 AI 分词以查看分段</p>';
         document.getElementById('play-btn').disabled = true;
+        document.getElementById('rehearsal-btn').disabled = true;
         document.getElementById('total-duration-info').classList.add('hidden');
+        this.updateSaveStatus();
     }
     
     async openProject(id) {
@@ -272,6 +311,8 @@ class MeowSpeechKit {
             this.currentProject = project;
             this.segments = project.segments || [];
             this.targetDuration = project.targetDuration || null;
+            this.isRehearsalTiming = project.isRehearsalTiming || false;
+            this.hasUnsavedChanges = false;
             this.showMainSection();
             
             document.getElementById('script-title').value = project.title || '';
@@ -282,7 +323,9 @@ class MeowSpeechKit {
                 this.displaySegments();
                 this.calculateAndDisplayTotalDuration();
                 document.getElementById('play-btn').disabled = false;
+                document.getElementById('rehearsal-btn').disabled = false;
             }
+            this.updateSaveStatus();
         } catch (error) {
             console.error('Failed to open project:', error);
             alert('打开项目失败');
@@ -302,10 +345,15 @@ class MeowSpeechKit {
         }
     }
     
-    async saveCurrentProject() {
+    async saveCurrentProject(isAutoSave = false) {
+        if (this.isSaving) return;
+        
         const title = document.getElementById('script-title').value || '未命名项目';
         const content = document.getElementById('script-content').value;
         const targetDuration = parseInt(document.getElementById('target-duration').value) || null;
+        
+        this.isSaving = true;
+        this.updateSaveStatus('saving');
         
         try {
             const response = await fetch('/api/scripts', {
@@ -316,20 +364,31 @@ class MeowSpeechKit {
                     title,
                     content,
                     segments: this.segments,
-                    targetDuration
+                    targetDuration,
+                    isRehearsalTiming: this.isRehearsalTiming
                 })
             });
             
             const data = await response.json();
             
             if (response.ok) {
-                this.currentProject = { ...this.currentProject, id: data.id, title, content, segments: this.segments, targetDuration };
+                this.currentProject = { ...this.currentProject, id: data.id, title, content, segments: this.segments, targetDuration, isRehearsalTiming: this.isRehearsalTiming };
                 document.getElementById('current-project-name').textContent = `项目：${title}`;
-                alert('项目保存成功！');
+                this.hasUnsavedChanges = false;
+                this.lastSaveTime = new Date();
+                this.updateSaveStatus('saved');
+                if (!isAutoSave) {
+                    alert('项目保存成功！');
+                }
             }
         } catch (error) {
             console.error('Failed to save project:', error);
-            alert('保存项目失败');
+            this.updateSaveStatus('unsaved');
+            if (!isAutoSave) {
+                alert('保存项目失败');
+            }
+        } finally {
+            this.isSaving = false;
         }
     }
     
@@ -341,6 +400,9 @@ class MeowSpeechKit {
         
         document.getElementById('user-info').textContent = `欢迎，${this.currentUser}`;
         document.getElementById('current-project-name').textContent = `项目：${this.currentProject?.title || '新项目'}`;
+        
+        // Start auto-save interval
+        this.startAutoSave();
         
         await this.loadModels();
         await this.updateRateLimitInfo();
@@ -587,6 +649,10 @@ class MeowSpeechKit {
             duration: seg.hasPause ? seg.duration + PAUSE_DURATION_MS : seg.duration
         }));
         
+        // AI-generated timing is not rehearsal timing
+        this.isRehearsalTiming = false;
+        this.markUnsaved();
+        
         this.displaySegments();
         this.calculateAndDisplayTotalDuration();
     }
@@ -736,7 +802,18 @@ class MeowSpeechKit {
         
         document.getElementById('total-duration-text').textContent = `分词后总时长：${minutes}分${seconds}秒`;
         
-        if (this.targetDuration) {
+        // Show timing source
+        const timingSourceEl = document.getElementById('timing-source');
+        if (this.isRehearsalTiming) {
+            timingSourceEl.textContent = '（使用排练计时）';
+            // Reset speed to 1.0 for rehearsal timing - don't auto-scale
+            document.getElementById('speed').value = 1.0;
+            document.getElementById('speed-value').textContent = '1.0x';
+            this.playbackSpeed = 1.0;
+            document.getElementById('speed-suggestion').textContent = 
+                this.targetDuration ? `目标时长 ${this.targetDuration} 秒（排练计时不自动调整速度）` : '';
+        } else if (this.targetDuration) {
+            timingSourceEl.textContent = '（使用 AI 分词时间）';
             const targetMs = this.targetDuration * 1000;
             const suggestedSpeed = Math.round((totalMs / targetMs) * 100) / 100;
             const clampedSpeed = Math.max(0.5, Math.min(2.0, suggestedSpeed));
@@ -748,6 +825,7 @@ class MeowSpeechKit {
             document.getElementById('speed-value').textContent = `${clampedSpeed.toFixed(1)}x`;
             this.playbackSpeed = clampedSpeed;
         } else {
+            timingSourceEl.textContent = '（使用 AI 分词时间）';
             document.getElementById('speed-suggestion').textContent = '';
         }
         
@@ -760,6 +838,7 @@ class MeowSpeechKit {
         if (this.segments.length === 0) {
             previewEl.innerHTML = '<p class="placeholder-text">未生成分段</p>';
             document.getElementById('play-btn').disabled = true;
+            document.getElementById('rehearsal-btn').disabled = true;
             return;
         }
         
@@ -778,6 +857,7 @@ class MeowSpeechKit {
         });
         
         document.getElementById('play-btn').disabled = false;
+        document.getElementById('rehearsal-btn').disabled = false;
     }
     
     openDurationModal(index) {
@@ -798,6 +878,7 @@ class MeowSpeechKit {
         const newDuration = parseInt(document.getElementById('duration-input').value);
         if (newDuration && newDuration >= 100) {
             this.segments[this.editingSegmentIndex].duration = newDuration;
+            this.markUnsaved();
             this.displaySegments();
             this.calculateAndDisplayTotalDuration();
         }
@@ -938,6 +1019,13 @@ class MeowSpeechKit {
     }
     
     exitTeleprompter() {
+        // If in rehearsal mode, ask for confirmation
+        if (this.isRehearsalMode && this.rehearsalTimings.length > 0) {
+            if (!confirm('确定要退出排练计时吗？已录制的时间将被丢弃。')) {
+                return;
+            }
+        }
+        
         clearInterval(this.timerInterval);
         clearTimeout(this.playbackInterval);
         this.isPlaying = false;
@@ -948,6 +1036,15 @@ class MeowSpeechKit {
         
         document.getElementById('teleprompter-section').classList.add('hidden');
         document.getElementById('main-section').classList.remove('hidden');
+        
+        // Reset rehearsal mode
+        if (this.isRehearsalMode) {
+            this.isRehearsalMode = false;
+            this.rehearsalTimings = [];
+            document.getElementById('pause-btn').classList.remove('hidden');
+            document.getElementById('next-word-btn').classList.add('hidden');
+            document.getElementById('rehearsal-status').classList.add('hidden');
+        }
         
         document.getElementById('pause-btn').textContent = '暂停';
         document.getElementById('pause-btn').classList.remove('btn-success');
@@ -987,21 +1084,27 @@ class MeowSpeechKit {
                 case ' ':
                 case 'Space':
                     e.preventDefault();
-                    this.togglePause();
+                    if (!this.isRehearsalMode) {
+                        this.togglePause();
+                    }
                     break;
                 case 'Escape':
                     this.exitTeleprompter();
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
-                    if (this.currentSegmentIndex > 0) {
+                    if (this.isRehearsalMode) {
+                        this.handleRehearsalPrevWord();
+                    } else if (this.currentSegmentIndex > 0) {
                         this.currentSegmentIndex--;
                         this.renderTeleprompterContent();
                     }
                     break;
                 case 'ArrowDown':
                     e.preventDefault();
-                    if (this.currentSegmentIndex < this.segments.length - 1) {
+                    if (this.isRehearsalMode) {
+                        this.handleRehearsalNextWord();
+                    } else if (this.currentSegmentIndex < this.segments.length - 1) {
                         this.currentSegmentIndex++;
                         this.renderTeleprompterContent();
                     }
@@ -1012,6 +1115,258 @@ class MeowSpeechKit {
                     break;
             }
         }
+    }
+    
+    // ============= Auto-save methods =============
+    
+    startAutoSave() {
+        // Clear any existing interval
+        if (this.autoSaveInterval) {
+            clearInterval(this.autoSaveInterval);
+        }
+        
+        // Auto-save every 30 seconds if there are unsaved changes
+        this.autoSaveInterval = setInterval(() => {
+            if (this.hasUnsavedChanges && this.currentProject) {
+                this.saveCurrentProject(true);
+            }
+        }, 30000);
+    }
+    
+    stopAutoSave() {
+        if (this.autoSaveInterval) {
+            clearInterval(this.autoSaveInterval);
+            this.autoSaveInterval = null;
+        }
+    }
+    
+    markUnsaved() {
+        this.hasUnsavedChanges = true;
+        this.updateSaveStatus('unsaved');
+    }
+    
+    updateSaveStatus(status) {
+        const statusEl = document.getElementById('save-status');
+        const statusTextEl = document.getElementById('save-status-text');
+        
+        statusEl.classList.remove('saved', 'saving', 'unsaved');
+        
+        if (status === 'saved') {
+            statusEl.classList.add('saved');
+            const timeStr = this.lastSaveTime ? this.formatTime(this.lastSaveTime) : '';
+            statusTextEl.textContent = `已保存${timeStr ? ' - ' + timeStr : ''}`;
+        } else if (status === 'saving') {
+            statusEl.classList.add('saving');
+            statusTextEl.textContent = '保存中...';
+        } else {
+            statusEl.classList.add('unsaved');
+            const timeStr = this.lastSaveTime ? this.formatTime(this.lastSaveTime) : '';
+            statusTextEl.textContent = `有未保存的更改${timeStr ? '（上次保存：' + timeStr + '）' : ''}`;
+        }
+    }
+    
+    formatTime(date) {
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+    }
+    
+    // ============= Rehearsal mode methods =============
+    
+    showRehearsalModal() {
+        if (this.segments.length === 0) {
+            alert('请先进行 AI 分词');
+            return;
+        }
+        document.getElementById('rehearsal-modal').classList.remove('hidden');
+    }
+    
+    closeRehearsalModal() {
+        document.getElementById('rehearsal-modal').classList.add('hidden');
+    }
+    
+    startRehearsalMode() {
+        this.closeRehearsalModal();
+        
+        if (this.segments.length === 0) return;
+        
+        document.getElementById('main-section').classList.add('hidden');
+        document.getElementById('teleprompter-section').classList.remove('hidden');
+        
+        const teleprompterEl = document.getElementById('teleprompter-section');
+        if (teleprompterEl.requestFullscreen) {
+            teleprompterEl.requestFullscreen().catch(err => console.log('Fullscreen not available:', err));
+        }
+        
+        // Initialize rehearsal mode
+        this.isRehearsalMode = true;
+        this.rehearsalTimings = [];
+        this.lastSegmentStartTime = 0;
+        this.rehearsalElapsedBase = 0;
+        this.currentSegmentIndex = 0;
+        this.elapsedMs = 0;
+        this.countdownSeconds = 10;
+        this.isPlaying = true;
+        this.isPaused = false;
+        
+        // Show rehearsal UI elements
+        document.getElementById('pause-btn').classList.add('hidden');
+        document.getElementById('next-word-btn').classList.remove('hidden');
+        document.getElementById('rehearsal-status').classList.remove('hidden');
+        document.getElementById('rehearsal-status-text').textContent = '排练倒数中...';
+        
+        this.renderTeleprompterContent();
+        this.startRehearsalCountdown();
+    }
+    
+    startRehearsalCountdown() {
+        const timerEl = document.getElementById('timer-value');
+        timerEl.className = 'countdown';
+        
+        this.timerInterval = setInterval(() => {
+            if (this.countdownSeconds > 0) {
+                timerEl.textContent = this.countdownSeconds;
+                this.countdownSeconds--;
+            } else {
+                clearInterval(this.timerInterval);
+                this.startRehearsalRecording();
+            }
+        }, 1000);
+    }
+    
+    startRehearsalRecording() {
+        const timerEl = document.getElementById('timer-value');
+        timerEl.className = 'running';
+        
+        document.getElementById('rehearsal-status-text').textContent = 
+            `排练录制中 (${this.currentSegmentIndex + 1}/${this.segments.length})`;
+        
+        this.lastSegmentStartTime = Date.now();
+        this.elapsedMs = 0;
+        this.rehearsalElapsedBase = 0; // Track accumulated time from completed segments
+        
+        // Start timer
+        this.timerInterval = setInterval(() => {
+            this.elapsedMs = Date.now() - this.lastSegmentStartTime + this.rehearsalElapsedBase;
+            this.updateTimer();
+        }, 100);
+    }
+    
+    handleRehearsalNextWord() {
+        if (!this.isRehearsalMode || this.countdownSeconds > 0) return;
+        
+        // Record the duration for the current segment
+        const currentTime = Date.now();
+        const segmentDuration = currentTime - this.lastSegmentStartTime;
+        
+        // Store the timing
+        this.rehearsalTimings[this.currentSegmentIndex] = segmentDuration;
+        
+        // Update accumulated base time
+        this.rehearsalElapsedBase += segmentDuration;
+        
+        // Move to next segment
+        if (this.currentSegmentIndex < this.segments.length - 1) {
+            this.currentSegmentIndex++;
+            this.lastSegmentStartTime = currentTime;
+            this.renderTeleprompterContent();
+            document.getElementById('rehearsal-status-text').textContent = 
+                `排练录制中 (${this.currentSegmentIndex + 1}/${this.segments.length})`;
+        } else {
+            // Recording complete
+            this.finishRehearsalRecording();
+        }
+    }
+    
+    handleRehearsalPrevWord() {
+        if (!this.isRehearsalMode || this.countdownSeconds > 0) return;
+        
+        if (this.currentSegmentIndex > 0) {
+            // Clear the timing for the current segment (we're going back)
+            this.rehearsalTimings[this.currentSegmentIndex] = undefined;
+            this.currentSegmentIndex--;
+            this.lastSegmentStartTime = Date.now();
+            // Also clear the timing for the segment we're going back to and recalculate base
+            const prevTiming = this.rehearsalTimings[this.currentSegmentIndex];
+            if (prevTiming !== undefined && prevTiming > 0) {
+                this.rehearsalElapsedBase -= prevTiming;
+            }
+            this.rehearsalTimings[this.currentSegmentIndex] = undefined;
+            this.renderTeleprompterContent();
+            document.getElementById('rehearsal-status-text').textContent = 
+                `排练录制中 (${this.currentSegmentIndex + 1}/${this.segments.length})`;
+        }
+    }
+    
+    finishRehearsalRecording() {
+        clearInterval(this.timerInterval);
+        this.isPlaying = false;
+        
+        // Calculate total time (filter out undefined values)
+        const totalMs = this.rehearsalTimings.reduce((sum, t) => sum + (t || 0), 0);
+        const totalSeconds = Math.round(totalMs / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        
+        document.getElementById('rehearsal-total-time').textContent = 
+            `总录制时长：${minutes}分${seconds}秒`;
+        
+        // Hide rehearsal status and show complete modal
+        document.getElementById('rehearsal-status').classList.add('hidden');
+        document.getElementById('rehearsal-complete-modal').classList.remove('hidden');
+    }
+    
+    saveRehearsalTiming() {
+        // Apply recorded timings to segments (only valid positive values)
+        for (let i = 0; i < this.rehearsalTimings.length; i++) {
+            if (this.rehearsalTimings[i] !== undefined && this.rehearsalTimings[i] > 0) {
+                this.segments[i].duration = Math.max(MIN_PHRASE_DURATION_MS, this.rehearsalTimings[i]);
+            }
+        }
+        
+        // Mark as rehearsal timing
+        this.isRehearsalTiming = true;
+        this.markUnsaved();
+        
+        this.closeRehearsalCompleteModal();
+        this.exitTeleprompterAfterRehearsal();
+        
+        // Update display
+        this.displaySegments();
+        this.calculateAndDisplayTotalDuration();
+    }
+    
+    discardRehearsalTiming() {
+        this.closeRehearsalCompleteModal();
+        this.exitTeleprompterAfterRehearsal();
+    }
+    
+    closeRehearsalCompleteModal() {
+        document.getElementById('rehearsal-complete-modal').classList.add('hidden');
+    }
+    
+    exitTeleprompterAfterRehearsal() {
+        clearInterval(this.timerInterval);
+        clearTimeout(this.playbackInterval);
+        this.isPlaying = false;
+        this.isRehearsalMode = false;
+        this.rehearsalTimings = [];
+        
+        if (document.fullscreenElement) {
+            document.exitFullscreen().catch(err => console.log('Exit fullscreen error:', err));
+        }
+        
+        document.getElementById('teleprompter-section').classList.add('hidden');
+        document.getElementById('main-section').classList.remove('hidden');
+        
+        // Reset UI elements
+        document.getElementById('pause-btn').classList.remove('hidden');
+        document.getElementById('next-word-btn').classList.add('hidden');
+        document.getElementById('rehearsal-status').classList.add('hidden');
+        document.getElementById('pause-btn').textContent = '暂停';
+        document.getElementById('pause-btn').classList.remove('btn-success');
+        document.getElementById('pause-btn').classList.add('btn-warning');
     }
 }
 
