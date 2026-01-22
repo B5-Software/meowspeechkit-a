@@ -44,22 +44,21 @@ const SCRIPTS_HEADERS = ['id', 'userId', 'title', 'content', 'segments', 'target
 function readCSV(filePath) {
     try {
         const content = fs.readFileSync(filePath, 'utf-8');
-        const lines = content.trim().split('\n');
-        if (lines.length <= 1) return [];
-        
-        const headers = lines[0].split(',');
-        const rows = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-            const values = parseCSVLine(lines[i]);
-            const row = {};
-            headers.forEach((header, index) => {
-                row[header] = values[index] || '';
+        const rows = parseCSVContent(content);
+        if (rows.length <= 1) return [];
+
+        const headers = rows[0];
+        const dataRows = rows.slice(1);
+
+        return dataRows
+            .filter(row => row.some(value => String(value).trim() !== ''))
+            .map(values => {
+                const row = {};
+                headers.forEach((header, index) => {
+                    row[header] = values[index] || '';
+                });
+                return row;
             });
-            rows.push(row);
-        }
-        return rows;
     } catch (error) {
         if (error.code === 'ENOENT') {
             return [];
@@ -69,29 +68,53 @@ function readCSV(filePath) {
     }
 }
 
-function parseCSVLine(line) {
-    const values = [];
+function parseCSVContent(content) {
+    const rows = [];
+    let row = [];
     let current = '';
     let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
+
+    for (let i = 0; i < content.length; i++) {
+        const char = content[i];
+
         if (char === '"') {
-            if (inQuotes && line[i + 1] === '"') {
+            if (inQuotes && content[i + 1] === '"') {
                 current += '"';
                 i++;
             } else {
                 inQuotes = !inQuotes;
             }
-        } else if (char === ',' && !inQuotes) {
-            values.push(current);
-            current = '';
-        } else {
-            current += char;
+            continue;
         }
+
+        if (char === ',' && !inQuotes) {
+            row.push(current);
+            current = '';
+            continue;
+        }
+
+        if ((char === '\n' || char === '\r') && !inQuotes) {
+            if (char === '\r' && content[i + 1] === '\n') {
+                i++;
+            }
+            row.push(current);
+            current = '';
+            if (row.length > 1 || row.some(value => String(value).trim() !== '')) {
+                rows.push(row);
+            }
+            row = [];
+            continue;
+        }
+
+        current += char;
     }
-    values.push(current);
-    return values;
+
+    if (current.length > 0 || row.length > 0) {
+        row.push(current);
+        rows.push(row);
+    }
+
+    return rows;
 }
 
 function writeCSV(filePath, headers, rows) {
@@ -311,13 +334,14 @@ ${text}
 请以JSON格式输出，包含segments数组，每个元素包含text（文本）和duration（时长，毫秒）。2词短语约800毫秒，3词短语约1200毫秒。在标点符号后添加适当停顿。`;
 
         // Make API request to AI model
+        const isOpenAI = model.apiUrl.includes('openai.com');
         const requestBody = JSON.stringify({
             model: model.id,
             messages: [
                 { role: 'system', content: config.systemPrompt },
                 { role: 'user', content: prompt }
             ],
-            stream: true,
+            stream: isOpenAI,
             max_tokens: model.maxTokens
         });
         
@@ -336,46 +360,98 @@ ${text}
             }
         }, (apiRes) => {
             let fullContent = '';
-            
+            let sseBuffer = '';
+            const responseChunks = [];
+
+            const buildFallbackContent = () => JSON.stringify(generateLocalSegments(text, targetDuration));
+            const normalizeFinalContent = (content) => {
+                if (typeof content !== 'string' || content.trim().length === 0) {
+                    return buildFallbackContent();
+                }
+                return content;
+            };
+
+            const sendDone = (content, extra = {}) => {
+                if (res.writableEnded) return;
+                res.write(`data: ${JSON.stringify({ done: true, content: normalizeFinalContent(content), ...extra })}\n\n`);
+                res.end();
+            };
+
+            const extractContentFromJson = (json) => {
+                if (!json) return '';
+                if (json.choices?.[0]?.message?.content) return json.choices[0].message.content;
+                if (json.choices?.[0]?.text) return json.choices[0].text;
+                if (Array.isArray(json.content)) {
+                    return json.content.map(part => part.text || '').join('');
+                }
+                return '';
+            };
+
+            if (apiRes.statusCode && apiRes.statusCode >= 400) {
+                apiRes.on('data', (chunk) => responseChunks.push(chunk));
+                apiRes.on('end', () => {
+                    const errorBody = Buffer.concat(responseChunks).toString('utf-8');
+                    console.error('API error response:', errorBody);
+                    sendDone('', { error: 'API error' });
+                });
+                return;
+            }
+
             apiRes.on('data', (chunk) => {
-                const lines = chunk.toString().split('\n');
+                if (!isOpenAI) {
+                    responseChunks.push(chunk);
+                    return;
+                }
+
+                sseBuffer += chunk.toString('utf-8');
+                const lines = sseBuffer.split(/\r?\n/);
+                sseBuffer = lines.pop() || '';
+
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') {
-                            // Send final content
-                            res.write(`data: ${JSON.stringify({ done: true, content: fullContent })}\n\n`);
-                            res.end();
-                            return;
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('data:')) continue;
+
+                    const data = trimmed.replace(/^data:\s*/, '');
+                    if (data === '[DONE]') {
+                        sendDone(fullContent);
+                        return;
+                    }
+
+                    try {
+                        const parsed = JSON.parse(data);
+                        const content = parsed.choices?.[0]?.delta?.content || '';
+                        if (content) {
+                            fullContent += content;
+                            res.write(`data: ${JSON.stringify({ content, progress: true })}\n\n`);
                         }
-                        try {
-                            const parsed = JSON.parse(data);
-                            const content = parsed.choices?.[0]?.delta?.content || '';
-                            if (content) {
-                                fullContent += content;
-                                res.write(`data: ${JSON.stringify({ 
-                                    content: content, 
-                                    progress: true 
-                                })}\n\n`);
-                            }
-                        } catch (e) {
-                            // Skip invalid JSON
-                        }
+                    } catch (e) {
+                        // Ignore malformed JSON fragments.
                     }
                 }
             });
-            
+
             apiRes.on('end', () => {
+                if (!isOpenAI) {
+                    const body = Buffer.concat(responseChunks).toString('utf-8');
+                    try {
+                        const parsed = JSON.parse(body);
+                        const content = extractContentFromJson(parsed);
+                        sendDone(content || '');
+                    } catch (e) {
+                        console.error('Failed to parse non-stream response:', e);
+                        sendDone('');
+                    }
+                    return;
+                }
+
                 if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ done: true, content: fullContent })}\n\n`);
-                    res.end();
+                    sendDone(fullContent);
                 }
             });
-            
+
             apiRes.on('error', (error) => {
                 console.error('API response error:', error);
-                res.write(`data: ${JSON.stringify({ error: 'API error' })}\n\n`);
-                res.end();
+                sendDone('', { error: 'API error' });
             });
         });
         

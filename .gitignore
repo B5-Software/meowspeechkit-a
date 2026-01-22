@@ -2,3 +2,10 @@ node_modules/
 *.log
 .env
 .DS_Store
+config/
+data/
+*.csv
+build/
+dist/
+.vscode/
+.idea/
