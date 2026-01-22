@@ -38,7 +38,7 @@ const SCRIPTS_FILE = path.join(DATA_DIR, 'scripts.csv');
 const AI_CONFIG_FILE = path.join(__dirname, 'config', 'ai-models.json');
 
 // CSV headers constants
-const SCRIPTS_HEADERS = ['id', 'userId', 'title', 'content', 'segments', 'targetDuration', 'createdAt'];
+const SCRIPTS_HEADERS = ['id', 'userId', 'title', 'content', 'segments', 'targetDuration', 'isRehearsalTiming', 'createdAt'];
 
 // Helper functions for CSV operations
 function readCSV(filePath) {
@@ -522,7 +522,7 @@ function generateLocalSegments(text, targetDuration) {
 // Save script
 app.post('/api/scripts', requireAuth, (req, res) => {
     try {
-        const { id, title, content, segments, targetDuration } = req.body;
+        const { id, title, content, segments, targetDuration, isRehearsalTiming } = req.body;
         const userId = req.session.userId;
         
         const scripts = readCSV(SCRIPTS_FILE);
@@ -535,7 +535,8 @@ app.post('/api/scripts', requireAuth, (req, res) => {
                 title: title || '未命名项目',
                 content: content || '',
                 segments: JSON.stringify(segments || []),
-                targetDuration: targetDuration || ''
+                targetDuration: targetDuration || '',
+                isRehearsalTiming: isRehearsalTiming ? 'true' : 'false'
             };
             
             writeCSV(SCRIPTS_FILE, SCRIPTS_HEADERS, scripts);
@@ -549,6 +550,7 @@ app.post('/api/scripts', requireAuth, (req, res) => {
                 content: content || '',
                 segments: JSON.stringify(segments || []),
                 targetDuration: targetDuration || '',
+                isRehearsalTiming: isRehearsalTiming ? 'true' : 'false',
                 createdAt: new Date().toISOString()
             };
             
@@ -595,6 +597,7 @@ app.get('/api/scripts/:id', requireAuth, (req, res) => {
             content: script.content,
             segments: JSON.parse(script.segments || '[]'),
             targetDuration: script.targetDuration ? parseInt(script.targetDuration) : null,
+            isRehearsalTiming: script.isRehearsalTiming === 'true',
             createdAt: script.createdAt
         });
     } catch (error) {
