@@ -157,7 +157,7 @@
 
         <!-- Teleprompter Section (Fullscreen) -->
         <div id="teleprompter-section" class="section hidden">
-            <div class="teleprompter-controls">
+            <div id="teleprompter-controls" class="teleprompter-controls">
                 <div class="control-group">
                     <label>字体大小</label>
                     <input type="range" id="font-size" min="24" max="120" value="48">
@@ -177,6 +177,12 @@
                 </div>
                 
                 <div class="control-group">
+                    <label>当前行位置</label>
+                    <input type="range" id="current-line-y" min="0" max="100" value="50">
+                    <span id="current-line-y-value">居中</span>
+                </div>
+                
+                <div class="control-group">
                     <label>深色模式</label>
                     <button id="dark-mode-toggle" class="btn btn-toggle">关</button>
                 </div>
@@ -186,6 +192,10 @@
                     <button id="next-word-btn" class="btn btn-primary hidden">下一词</button>
                     <button id="exit-btn" class="btn btn-danger">退出</button>
                 </div>
+            </div>
+            
+            <div id="controls-hint" class="controls-hint hidden">
+                点击屏幕显示/隐藏控制面板
             </div>
             
             <div id="teleprompter-display" class="teleprompter-display">

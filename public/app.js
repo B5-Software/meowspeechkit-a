@@ -22,6 +22,8 @@ class MeowSpeechKit {
         this.candidateLines = 2;
         this.fontSize = 48;
         this.isDarkMode = false;
+        this.currentLineY = 50; // Default to center (50%)
+        this.controlsVisible = true; // Controls start visible with hint
         this.targetDuration = null;
         this.editingSegmentIndex = null;
         this.isRehearsalTiming = false;
@@ -87,6 +89,7 @@ class MeowSpeechKit {
         document.getElementById('font-size').addEventListener('input', (e) => this.updateFontSize(e.target.value));
         document.getElementById('speed').addEventListener('input', (e) => this.updateSpeed(e.target.value));
         document.getElementById('candidate-lines').addEventListener('input', (e) => this.updateCandidateLines(e.target.value));
+        document.getElementById('current-line-y').addEventListener('input', (e) => this.updateCurrentLineY(e.target.value));
         document.getElementById('dark-mode-toggle').addEventListener('click', () => this.toggleDarkMode());
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('next-word-btn').addEventListener('click', () => this.handleRehearsalNextWord());
@@ -902,11 +905,23 @@ class MeowSpeechKit {
             teleprompterEl.requestFullscreen().catch(err => console.log('Fullscreen not available:', err));
         }
         
+        // Set up click handler for toggling controls (ignore clicks on controls themselves)
+        const displayEl = document.getElementById('teleprompter-display');
+        this.teleprompterClickHandler = (e) => {
+            // Don't toggle if clicking on controls
+            const controlsEl = document.getElementById('teleprompter-controls');
+            if (!controlsEl.contains(e.target)) {
+                this.toggleControls();
+            }
+        };
+        displayEl.addEventListener('click', this.teleprompterClickHandler);
+        
         this.currentSegmentIndex = 0;
         this.elapsedMs = 0;
         this.countdownSeconds = 10;
         this.isPlaying = true;
         this.isPaused = false;
+        this.controlsVisible = true;
         
         document.getElementById('pause-btn').textContent = '暂停';
         this.renderTeleprompterContent();
@@ -938,6 +953,31 @@ class MeowSpeechKit {
         }
         
         contentEl.innerHTML = html;
+        this.updateTeleprompterPosition();
+    }
+    
+    updateTeleprompterPosition() {
+        const contentEl = document.getElementById('teleprompter-content');
+        const displayEl = document.getElementById('teleprompter-display');
+        
+        if (!contentEl || !displayEl) return;
+        
+        // Get the current line element
+        const currentLine = contentEl.querySelector('.teleprompter-line.current');
+        if (!currentLine) return;
+        
+        // Calculate the target Y position based on full screen height
+        // Use window.innerHeight to get the actual viewport height
+        const screenHeight = window.innerHeight;
+        const targetY = (this.currentLineY / 100) * screenHeight;
+        
+        // Get the current line's position relative to its container
+        const currentLineTop = currentLine.offsetTop;
+        
+        // Calculate the transform needed to position the current line at targetY
+        const translateY = targetY - currentLineTop;
+        
+        contentEl.style.transform = `translateY(${translateY}px)`;
     }
     
     startCountdown() {
@@ -1030,6 +1070,13 @@ class MeowSpeechKit {
         clearTimeout(this.playbackInterval);
         this.isPlaying = false;
         
+        // Remove click handler
+        if (this.teleprompterClickHandler) {
+            const displayEl = document.getElementById('teleprompter-display');
+            displayEl.removeEventListener('click', this.teleprompterClickHandler);
+            this.teleprompterClickHandler = null;
+        }
+        
         if (document.fullscreenElement) {
             document.exitFullscreen().catch(err => console.log('Exit fullscreen error:', err));
         }
@@ -1068,6 +1115,24 @@ class MeowSpeechKit {
         if (this.isPlaying) this.renderTeleprompterContent();
     }
     
+    updateCurrentLineY(value) {
+        this.currentLineY = parseInt(value);
+        const displayEl = document.getElementById('current-line-y-value');
+        
+        // Update display text based on position
+        if (value === '50') {
+            displayEl.textContent = '居中';
+        } else if (value === '0') {
+            displayEl.textContent = '顶部';
+        } else if (value === '100') {
+            displayEl.textContent = '底部';
+        } else {
+            displayEl.textContent = `${value}%`;
+        }
+        
+        if (this.isPlaying) this.updateTeleprompterPosition();
+    }
+    
     toggleDarkMode() {
         this.isDarkMode = !this.isDarkMode;
         const teleprompterEl = document.getElementById('teleprompter-section');
@@ -1076,6 +1141,20 @@ class MeowSpeechKit {
         const toggleBtn = document.getElementById('dark-mode-toggle');
         toggleBtn.textContent = this.isDarkMode ? '开' : '关';
         toggleBtn.classList.toggle('active', this.isDarkMode);
+    }
+    
+    toggleControls() {
+        this.controlsVisible = !this.controlsVisible;
+        const controlsEl = document.getElementById('teleprompter-controls');
+        const hintEl = document.getElementById('controls-hint');
+        
+        if (this.controlsVisible) {
+            controlsEl.classList.remove('hidden');
+            if (hintEl) hintEl.classList.add('hidden');
+        } else {
+            controlsEl.classList.add('hidden');
+            if (hintEl) hintEl.classList.remove('hidden');
+        }
     }
     
     handleKeyboard(e) {
