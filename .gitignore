@@ -9,3 +9,6 @@ build/
 dist/
 .vscode/
 .idea/
+
+# Test files
+test.html

@@ -954,8 +954,11 @@ class MeowSpeechKit {
         if (!currentLine) return;
         
         // Calculate the target Y position in the viewport
+        // Account for the padding-top of 80px from the controls
+        const paddingTop = 80;
         const displayHeight = displayEl.clientHeight;
-        const targetY = (this.currentLineY / 100) * displayHeight;
+        const visibleHeight = displayHeight - paddingTop;
+        const targetY = paddingTop + (this.currentLineY / 100) * visibleHeight;
         
         // Get the current line's position relative to its container
         const currentLineTop = currentLine.offsetTop;
@@ -1099,14 +1102,12 @@ class MeowSpeechKit {
         const displayEl = document.getElementById('current-line-y-value');
         
         // Update display text based on position
-        if (value == 50) {
+        if (value === '50') {
             displayEl.textContent = '居中';
-        } else if (value == 0) {
+        } else if (value === '0') {
             displayEl.textContent = '顶部';
-        } else if (value == 100) {
+        } else if (value === '100') {
             displayEl.textContent = '底部';
-        } else if (value < 50) {
-            displayEl.textContent = `${value}%`;
         } else {
             displayEl.textContent = `${value}%`;
         }
