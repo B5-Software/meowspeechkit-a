@@ -22,6 +22,7 @@ class MeowSpeechKit {
         this.candidateLines = 2;
         this.fontSize = 48;
         this.isDarkMode = false;
+        this.currentLineY = 50; // Default to center (50%)
         this.targetDuration = null;
         this.editingSegmentIndex = null;
         this.isRehearsalTiming = false;
@@ -87,6 +88,7 @@ class MeowSpeechKit {
         document.getElementById('font-size').addEventListener('input', (e) => this.updateFontSize(e.target.value));
         document.getElementById('speed').addEventListener('input', (e) => this.updateSpeed(e.target.value));
         document.getElementById('candidate-lines').addEventListener('input', (e) => this.updateCandidateLines(e.target.value));
+        document.getElementById('current-line-y').addEventListener('input', (e) => this.updateCurrentLineY(e.target.value));
         document.getElementById('dark-mode-toggle').addEventListener('click', () => this.toggleDarkMode());
         document.getElementById('pause-btn').addEventListener('click', () => this.togglePause());
         document.getElementById('next-word-btn').addEventListener('click', () => this.handleRehearsalNextWord());
@@ -938,6 +940,30 @@ class MeowSpeechKit {
         }
         
         contentEl.innerHTML = html;
+        this.updateTeleprompterPosition();
+    }
+    
+    updateTeleprompterPosition() {
+        const contentEl = document.getElementById('teleprompter-content');
+        const displayEl = document.getElementById('teleprompter-display');
+        
+        if (!contentEl || !displayEl) return;
+        
+        // Get the current line element
+        const currentLine = contentEl.querySelector('.teleprompter-line.current');
+        if (!currentLine) return;
+        
+        // Calculate the target Y position in the viewport
+        const displayHeight = displayEl.clientHeight;
+        const targetY = (this.currentLineY / 100) * displayHeight;
+        
+        // Get the current line's position relative to its container
+        const currentLineTop = currentLine.offsetTop;
+        
+        // Calculate the transform needed to position the current line at targetY
+        const translateY = targetY - currentLineTop;
+        
+        contentEl.style.transform = `translateY(${translateY}px)`;
     }
     
     startCountdown() {
@@ -1066,6 +1092,26 @@ class MeowSpeechKit {
         this.candidateLines = parseInt(value);
         document.getElementById('candidate-lines-value').textContent = value;
         if (this.isPlaying) this.renderTeleprompterContent();
+    }
+    
+    updateCurrentLineY(value) {
+        this.currentLineY = parseInt(value);
+        const displayEl = document.getElementById('current-line-y-value');
+        
+        // Update display text based on position
+        if (value == 50) {
+            displayEl.textContent = '居中';
+        } else if (value == 0) {
+            displayEl.textContent = '顶部';
+        } else if (value == 100) {
+            displayEl.textContent = '底部';
+        } else if (value < 50) {
+            displayEl.textContent = `${value}%`;
+        } else {
+            displayEl.textContent = `${value}%`;
+        }
+        
+        if (this.isPlaying) this.updateTeleprompterPosition();
     }
     
     toggleDarkMode() {

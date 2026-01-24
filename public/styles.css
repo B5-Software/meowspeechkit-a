@@ -572,21 +572,20 @@ body {
 .teleprompter-display {
     width: 100%;
     height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     overflow: hidden;
     padding-top: 80px; /* Space for controls */
+    position: relative;
 }
 
 .teleprompter-content {
     text-align: center;
     width: 80%;
     max-width: 1200px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    transition: transform 0.3s ease;
 }
 
 .teleprompter-line {
