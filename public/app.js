@@ -909,7 +909,8 @@ class MeowSpeechKit {
         const displayEl = document.getElementById('teleprompter-display');
         this.teleprompterClickHandler = (e) => {
             // Don't toggle if clicking on controls
-            if (!e.target.closest('.teleprompter-controls')) {
+            const controlsEl = document.getElementById('teleprompter-controls');
+            if (!controlsEl.contains(e.target)) {
                 this.toggleControls();
             }
         };
@@ -965,7 +966,7 @@ class MeowSpeechKit {
         const currentLine = contentEl.querySelector('.teleprompter-line.current');
         if (!currentLine) return;
         
-        // Calculate the target Y position based on full screen height (100vh)
+        // Calculate the target Y position based on full screen height
         // Use window.innerHeight to get the actual viewport height
         const screenHeight = window.innerHeight;
         const targetY = (this.currentLineY / 100) * screenHeight;
