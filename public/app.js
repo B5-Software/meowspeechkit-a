@@ -23,6 +23,7 @@ class MeowSpeechKit {
         this.fontSize = 48;
         this.isDarkMode = false;
         this.currentLineY = 50; // Default to center (50%)
+        this.controlsVisible = true; // Controls start visible with hint
         this.targetDuration = null;
         this.editingSegmentIndex = null;
         this.isRehearsalTiming = false;
@@ -904,11 +905,22 @@ class MeowSpeechKit {
             teleprompterEl.requestFullscreen().catch(err => console.log('Fullscreen not available:', err));
         }
         
+        // Set up click handler for toggling controls (ignore clicks on controls themselves)
+        const displayEl = document.getElementById('teleprompter-display');
+        this.teleprompterClickHandler = (e) => {
+            // Don't toggle if clicking on controls
+            if (!e.target.closest('.teleprompter-controls')) {
+                this.toggleControls();
+            }
+        };
+        displayEl.addEventListener('click', this.teleprompterClickHandler);
+        
         this.currentSegmentIndex = 0;
         this.elapsedMs = 0;
         this.countdownSeconds = 10;
         this.isPlaying = true;
         this.isPaused = false;
+        this.controlsVisible = true;
         
         document.getElementById('pause-btn').textContent = '暂停';
         this.renderTeleprompterContent();
@@ -953,12 +965,10 @@ class MeowSpeechKit {
         const currentLine = contentEl.querySelector('.teleprompter-line.current');
         if (!currentLine) return;
         
-        // Calculate the target Y position in the viewport
-        // Account for the padding-top of 80px from the controls
-        const paddingTop = 80;
-        const displayHeight = displayEl.clientHeight;
-        const visibleHeight = displayHeight - paddingTop;
-        const targetY = paddingTop + (this.currentLineY / 100) * visibleHeight;
+        // Calculate the target Y position based on full screen height (100vh)
+        // Use window.innerHeight to get the actual viewport height
+        const screenHeight = window.innerHeight;
+        const targetY = (this.currentLineY / 100) * screenHeight;
         
         // Get the current line's position relative to its container
         const currentLineTop = currentLine.offsetTop;
@@ -1059,6 +1069,13 @@ class MeowSpeechKit {
         clearTimeout(this.playbackInterval);
         this.isPlaying = false;
         
+        // Remove click handler
+        if (this.teleprompterClickHandler) {
+            const displayEl = document.getElementById('teleprompter-display');
+            displayEl.removeEventListener('click', this.teleprompterClickHandler);
+            this.teleprompterClickHandler = null;
+        }
+        
         if (document.fullscreenElement) {
             document.exitFullscreen().catch(err => console.log('Exit fullscreen error:', err));
         }
@@ -1123,6 +1140,20 @@ class MeowSpeechKit {
         const toggleBtn = document.getElementById('dark-mode-toggle');
         toggleBtn.textContent = this.isDarkMode ? '开' : '关';
         toggleBtn.classList.toggle('active', this.isDarkMode);
+    }
+    
+    toggleControls() {
+        this.controlsVisible = !this.controlsVisible;
+        const controlsEl = document.getElementById('teleprompter-controls');
+        const hintEl = document.getElementById('controls-hint');
+        
+        if (this.controlsVisible) {
+            controlsEl.classList.remove('hidden');
+            if (hintEl) hintEl.classList.add('hidden');
+        } else {
+            controlsEl.classList.add('hidden');
+            if (hintEl) hintEl.classList.remove('hidden');
+        }
     }
     
     handleKeyboard(e) {
